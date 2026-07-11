@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Centro de Comando - Accesos y Escoltas</title>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, updateDoc, doc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBU3oWLwBkIc_5riruLGc3dFS5wHo2RV0s",
+            authDomain: "sistema-vigilancia-6851e.firebaseapp.com",
+            projectId: "sistema-vigilancia-6851e",
+            storageBucket: "sistema-vigilancia-6851e.firebasestorage.app",
+            messagingSenderId: "714792023462",
+            appId: "1:714792023462:web:4f560ecf2a16e6a041cb67"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        window.db = db;
+        window.collection = collection;
+        window.addDoc = addDoc;
+        window.updateDoc = updateDoc;
+        window.doc = doc;
+        window.query = query;
+        window.orderBy = orderBy;
+        window.onSnapshot = onSnapshot;
+    </script>
+
+    <style>
+        :root {
+            --bg: #f4f7f6; --p: #2c3e50; --s: #3498db; --g: #27ae60; --r: #e74c3c; --w: #fff; --text: #333;
+            --amarillo: #f1c40f; --verde: #2ecc71; --gris: #95a5a6; --naranja: #e67e22;
+        }
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+        body.rol-caseta { display: flex; height: 100vh; overflow: hidden; }
+        #app-caseta { display: none; }
+
+        /* ===== SIDEBAR (CASETA) ===== */
+        .sidebar { width: 250px; background: var(--p); color: var(--w); display: flex; flex-direction: column; padding: 20px 0; flex-shrink: 0; }
+        .sidebar h2 { text-align: center; margin: 0 0 20px 0; font-size: 1.2em; padding: 0 15px; }
+        .menu-btn { background: transparent; color: #bdc3c7; border: none; padding: 15px 20px; text-align: left; font-size: 1em; cursor: pointer; transition: 0.2s; border-left: 4px solid transparent; font-weight: bold; }
+        .menu-btn:hover { background: #34495e; color: var(--w); }
+        .menu-btn.active { background: #34495e; color: var(--s); border-left-color: var(--s); }
+        .sidebar-links { margin-top: auto; padding: 15px; font-size: 0.75em; color: #7f8c8d; border-top: 1px solid #34495e; }
+        .sidebar-links a { color: #5dade2; }
+
+        .workspace { flex: 1; padding: 20px; overflow-y: auto; }
+        .panel { display: none; background: var(--w); padding: 25px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); max-width: 1000px; margin: 0 auto; }
+        .panel.active { display: block; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        h3.title { color: var(--p); border-bottom: 2px solid var(--s); padding-bottom: 10px; margin-top: 0; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 15px; }
+        label { font-weight: bold; font-size: 0.85em; color: #7f8c8d; text-transform: uppercase; margin-bottom: 5px; display: block; }
+        input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 1em; }
+        textarea { resize: vertical; height: 60px; }
+
+        .btn-main { background: var(--g); color: var(--w); border: none; width: 100%; padding: 15px; font-size: 1.1em; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        .btn-main:hover { background: #219653; }
+        .btn-main:disabled { background: #95a5a6; cursor: not-allowed; }
+        .btn-danger { background: var(--r); color: var(--w); border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+
+        .btn-camara { border: 2px dashed var(--s); background: #ebf5fb; color: var(--s); padding: 15px; text-align: center; font-weight: bold; border-radius: 6px; cursor: pointer; position: relative; margin-bottom: 15px; }
+        .btn-camara input[type=file] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+        #preview-foto { max-width: 100%; height: 150px; border-radius: 6px; display: none; margin: 0 auto 15px auto; object-fit: cover; border: 1px solid #ccc; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 0.9em; margin-top: 15px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: var(--p); color: var(--w); position: sticky; top: 0; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; color: var(--w); display: inline-block; }
+        .bg-g { background: var(--g); } .bg-r { background: var(--r); } .bg-s { background: var(--s); }
+        .badge-amarillo { background: var(--amarillo); color: #000; }
+        .badge-verde { background: var(--verde); }
+        .badge-gris { background: var(--gris); }
+        .badge-naranja { background: var(--naranja); }
+
+        .kpi-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .kpi-card { background: var(--w); border-left: 5px solid var(--s); padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .kpi-card h4 { margin: 0 0 10px 0; color: #7f8c8d; font-size: 0.9em; text-transform: uppercase; }
+        .kpi-card h1 { margin: 0; color: var(--p); font-size: 2.5em; }
+
+        .escolta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+        .btn-esc { padding: 10px; font-weight: bold; color: var(--w); border: 2px solid transparent; border-radius: 6px; cursor: pointer; }
+        .esc-1 { background: var(--amarillo); color: #000; } .esc-2 { background: var(--naranja); } .esc-3 { background: var(--g); } .esc-4 { background: var(--gris); }
+
+        /* ===== SELECTOR DE CODIGO ===== */
+        .codigo-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+        .btn-codigo { padding: 18px 8px; font-weight: bold; border-radius: 8px; cursor: pointer; border: 3px solid transparent; font-size: 0.95em; color: #000; text-align: center; transition: 0.15s; }
+        .btn-codigo small { display: block; font-weight: normal; font-size: 0.75em; margin-top: 4px; }
+        .btn-codigo.sel-amarillo { background: var(--amarillo); }
+        .btn-codigo.sel-verde { background: var(--verde); color: var(--w); }
+        .btn-codigo.sel-gris { background: var(--gris); color: var(--w); }
+        .btn-codigo.sel-naranja { background: var(--naranja); color: var(--w); }
+        .btn-codigo.activo { border-color: var(--p); transform: scale(1.04); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+
+        .zona-badge { display: inline-block; padding: 6px 14px; border-radius: 20px; font-weight: bold; margin-top: 8px; font-size: 0.85em; }
+        .zona-1 { background: #d6eaf8; color: #1a5276; }
+        .zona-2 { background: #d5f5e3; color: #196f3d; }
+        .zona-x { background: #fadbd8; color: #922b21; }
+
+        .oculto { display: none !important; }
+        .aviso-escolta { background: #fef9e7; border: 2px solid var(--amarillo); border-radius: 8px; padding: 12px; margin-bottom: 15px; font-weight: bold; color: #7d6608; }
+
+        /* ===== VISTA PATRULLERO (CELULAR) ===== */
+        #app-patrullero { display: none; min-height: 100vh; padding: 14px; }
+        #app-patrullero.visible { display: block; }
+        .patrullero-header { text-align: center; margin-bottom: 14px; }
+        .patrullero-header h2 { margin: 0 0 4px 0; color: var(--p); }
+        .patrullero-header p { margin: 0; color: #7f8c8d; font-size: 0.9em; }
+        .btn-activar-sonido { width: 100%; padding: 16px; font-size: 1.1em; font-weight: bold; background: var(--p); color: var(--w); border: none; border-radius: 8px; margin-bottom: 16px; }
+        .btn-activar-sonido.ok { background: var(--g); }
+
+        .card-arribo { border-radius: 10px; padding: 16px; margin-bottom: 12px; color: #000; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+        .card-arribo.c-amarillo { background: var(--amarillo); animation: parpadeo 1s infinite; }
+        .card-arribo.c-verde { background: #d5f5e3; }
+        .card-arribo.c-gris { background: #ecf0f1; color: #555; }
+        .card-arribo.c-naranja { background: #fdebd0; }
+        .card-arribo.reconocido { animation: none; opacity: 0.75; }
+        @keyframes parpadeo { 0%,100% { box-shadow: 0 0 0px 0px rgba(231,76,60,0.6); } 50% { box-shadow: 0 0 0px 10px rgba(231,76,60,0); } }
+
+        .card-titulo { font-size: 1.15em; font-weight: bold; margin-bottom: 4px; }
+        .card-sub { font-size: 0.9em; margin-bottom: 8px; }
+        .card-accion { display: flex; gap: 8px; }
+        .btn-enterado { flex: 1; padding: 12px; background: var(--p); color: var(--w); border: none; border-radius: 6px; font-weight: bold; }
+        .etiqueta-escolta { display: inline-block; background: var(--r); color: var(--w); padding: 4px 10px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin-bottom: 6px; }
+        .vacio-cola { text-align: center; color: #95a5a6; padding: 40px 0; }
+    </style>
+</head>
+<body>
+
+<!-- ============== VISTA CASETA / MONITORISTA ============== -->
+<div id="app-caseta">
+    <div class="sidebar">
+        <h2>🛡️ Control Central</h2>
+        <button class="menu-btn active" onclick="cambiarPanel('panel-registro', this)">📍 Registro de Entrada</button>
+        <button class="menu-btn" onclick="cambiarPanel('panel-salida', this)">👋 Confirmar Salida</button>
+        <button class="menu-btn" onclick="cambiarPanel('panel-escoltas', this)">🚗 Asignar Escolta</button>
+        <button class="menu-btn" onclick="verificarAuditoria(this)">📋 Bitácora General</button>
+        <button class="menu-btn" onclick="cambiarPanel('panel-rendimiento', this)">📈 Medir Rendimiento</button>
+        <button class="menu-btn" onclick="cambiarPanel('panel-enlaces', this)">📱 Enlaces Patrulleros</button>
+        <div class="sidebar-links">Etapa 1: Lotes 1800–1999<br>Etapa 2: Lotes 2000–2200</div>
+    </div>
+
+    <div class="workspace">
+
+        <div id="panel-registro" class="panel active">
+            <h3 class="title">NUEVO ACCESO</h3>
+
+            <label>1. Código de Importancia</label>
+            <div class="codigo-grid">
+                <div class="btn-codigo sel-amarillo" id="btn-cod-amarillo" onclick="seleccionarCodigo('amarillo')">🟡 AMARILLO<small>Proveedor · escolta 100%</small></div>
+                <div class="btn-codigo sel-verde" id="btn-cod-verde" onclick="seleccionarCodigo('verde')">🟢 VERDE<small>Invitación</small></div>
+                <div class="btn-codigo sel-gris" id="btn-cod-gris" onclick="seleccionarCodigo('gris')">⚪ GRIS<small>Dueño (App)</small></div>
+                <div class="btn-codigo sel-naranja" id="btn-cod-naranja" onclick="seleccionarCodigo('naranja')">🟧 NARANJA<small>Dueño (RFID)</small></div>
+            </div>
+
+            <div id="aviso-escolta" class="aviso-escolta oculto">⚠️ Código AMARILLO: este ingreso se escolta obligatoriamente y se envía al filtro de entrada / caseta. Se notificará de inmediato al patrullero de la etapa correspondiente.</div>
+
+            <div class="grid-2">
+                <div>
+                    <label>🏠 Domicilio a Visitar</label>
+                    <input type="text" id="reg_domicilio" placeholder="Ej. 1850 o Lote 2045" oninput="actualizarZona()">
+                    <div id="zona-preview"></div>
+                </div>
+                <div id="campo-ubicacion">
+                    <label>📍 Ubicación de Caseta</label>
+                    <select id="reg_ubicacion">
+                        <option value="General">General</option>
+                        <option value="Cardones">Cardones</option>
+                        <option value="Fotur">Fotur</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="bloque-completo">
+                <div class="grid-2">
+                    <div><label>👷 Tipo de Acceso</label>
+                        <select id="reg_tipo">
+                            <option value="Proveedor Uber/Didi">Proveedor Uber / Didi</option>
+                            <option value="Paqueteria">Paquetería</option>
+                            <option value="Proveedor de Obra">Proveedor de Obra</option>
+                            <option value="Proveedor de Gas">Proveedor de Gas / Agua</option>
+                            <option value="Visita Particular">Visita Particular</option>
+                        </select>
+                    </div>
+                    <div><label>👤 Nombre Completo</label><input type="text" id="reg_nombre" placeholder="Nombre del conductor / visitante"></div>
+                </div>
+
+                <div class="grid-3">
+                    <div><label>🚗 Marca Vehículo</label><input type="text" id="reg_marca" placeholder="Ej. Nissan"></div>
+                    <div><label>🎨 Color</label><input type="text" id="reg_color" placeholder="Ej. Blanco"></div>
+                    <div><label>🔢 Placas</label><input type="text" id="reg_placas" placeholder="ABC-123" style="text-transform: uppercase;"></div>
+                </div>
+
+                <label>📝 Comentarios / Novedades</label>
+                <textarea id="reg_comentarios" placeholder="Materiales, daños en vehículo, etc."></textarea>
+
+                <label>📸 Evidencia Fotográfica (ID o Placas)</label>
+                <div class="btn-camara">
+                    📷 CLIC PARA TOMAR FOTO O SUBIR IMAGEN
+                    <input type="file" id="foto_id" accept="image/*" capture="environment" onchange="procesarFoto(event)">
+                </div>
+                <img id="preview-foto" src="">
+            </div>
+
+            <div id="bloque-rapido" class="oculto">
+                <label>👤 Nombre (opcional)</label>
+                <input type="text" id="reg_nombre_rapido" placeholder="Nombre del residente / visitante">
+            </div>
+
+            <button id="btnGuardar" class="btn-main" onclick="registrarEntrada()">REGISTRAR ENTRADA EN SISTEMA</button>
+        </div>
+
+        <div id="panel-salida" class="panel">
+            <h3 class="title">CONFIRMAR SALIDAS (Personas al interior)</h3>
+            <input type="text" id="buscadorSalida" placeholder="🔍 Buscar por nombre o placa..." oninput="renderizarSalidas()" style="margin-bottom: 15px;">
+            <table>
+                <thead><tr><th>Código</th><th>Hora Entrada</th><th>Visitante</th><th>Placas</th><th>Destino</th><th>Acción</th></tr></thead>
+                <tbody id="tabla-salidas"></tbody>
+            </table>
+        </div>
+
+        <div id="panel-escoltas" class="panel">
+            <h3 class="title">ASIGNACIÓN TÁCTICA DE ESCOLTAS</h3>
+            <p style="font-size: 0.9em; color: #7f8c8d;">Selecciona un proveedor activo y asígnale una unidad de escolta.</p>
+            <label>1. Seleccionar Proveedor Activo:</label>
+            <select id="esc_proveedor" style="margin-bottom: 20px;"></select>
+            <label>2. Asignar Unidad de Escolta:</label>
+            <div class="escolta-grid">
+                <button class="btn-esc esc-1" onclick="asignarEscolta('Unidad Amarilla')">Unidad Amarilla</button>
+                <button class="btn-esc esc-2" onclick="asignarEscolta('Unidad Naranja')">Unidad Naranja</button>
+                <button class="btn-esc esc-3" onclick="asignarEscolta('Unidad Verde')">Unidad Verde</button>
+                <button class="btn-esc esc-4" onclick="asignarEscolta('Unidad Gris')">Unidad Gris</button>
+            </div>
+            <h4 style="margin-top: 30px;">Escoltas en Curso:</h4>
+            <table>
+                <thead><tr><th>Proveedor</th><th>Destino</th><th>Escolta Asignada</th></tr></thead>
+                <tbody id="tabla-escoltas-activas"></tbody>
+            </table>
+        </div>
+
+        <div id="panel-bitacora" class="panel">
+            <h3 class="title">AUDITORÍA: BITÁCORA INMUTABLE</h3>
+            <input type="text" id="buscadorBitacora" placeholder="🔍 Buscar historial completo..." oninput="renderizarBitacora()" style="margin-bottom: 15px;">
+            <div style="overflow-x: auto; max-height: 600px;">
+                <table>
+                    <thead><tr><th>Código</th><th>Movimiento</th><th>Fecha/Hora</th><th>Visitante</th><th>Vehículo</th><th>Escolta</th><th>Duración</th></tr></thead>
+                    <tbody id="tabla-bitacora"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="panel-rendimiento" class="panel">
+            <h3 class="title">DASHBOARD DE RENDIMIENTO Y MÉTRICAS</h3>
+            <div class="kpi-container">
+                <div class="kpi-card"><h4>Visitantes Actuales</h4><h1 id="kpi-adentro">0</h1></div>
+                <div class="kpi-card"><h4>Ingresos Totales (Hoy)</h4><h1 id="kpi-hoy">0</h1></div>
+                <div class="kpi-card" style="border-left-color: var(--g);"><h4>Escoltas Realizadas</h4><h1 id="kpi-escoltas">0</h1></div>
+                <div class="kpi-card" style="border-left-color: var(--r);"><h4>Tiempo Promedio Adentro</h4><h1 id="kpi-tiempo">0 <span style="font-size: 14px;">min</span></h1></div>
+            </div>
+        </div>
+
+        <div id="panel-enlaces" class="panel">
+            <h3 class="title">📱 ARCHIVOS PARA CELULARES DE PATRULLEROS</h3>
+            <p>Ya no se usan enlaces con parámetros: cada patrullero tiene su propio archivo con el rol fijo, listo para escanear por QR desde Servez (u otro servidor local):</p>
+            <ul style="line-height:2;">
+                <li><b>caseta.html</b> → esta misma pantalla, para la computadora de caseta / monitorista.</li>
+                <li><b>patrullero1.html</b> → celular del Patrullero Etapa 1 (Lotes 1800–1999).</li>
+                <li><b>patrullero2.html</b> → celular del Patrullero Etapa 2 (Lotes 2000–2200).</li>
+            </ul>
+            <p style="margin-top:20px; font-size:0.85em; color:#7f8c8d;">Coloca los tres archivos juntos en la misma carpeta que sirvas con Servez. El patrullero solo escanea el QR, entra a la carpeta y toca su archivo correspondiente — no necesita escribir nada más en la URL.</p>
+        </div>
+
+    </div>
+</div>
+
+<!-- ============== VISTA PATRULLERO (CELULAR) ============== -->
+<div id="app-patrullero">
+    <div class="patrullero-header">
+        <h2 id="patrullero-titulo">🚓 Patrullero</h2>
+        <p id="patrullero-sub"></p>
+    </div>
+    <button id="btn-activar-sonido" class="btn-activar-sonido" onclick="activarSonido()">🔊 TOCAR AQUÍ PARA ACTIVAR ALERTAS DE AUDIO</button>
+    <div id="lista-arribos"></div>
+</div>
+
+<script type="module">
+    // ---------- ESTADO GENERAL ----------
+    let imagenBase64 = "NO";
+    let accesosActivos = [];
+    let historialCompleto = [];
+    let codigoActual = "amarillo";
+    let zonaCalculada = null;
+
+    const rol = 'caseta'; // archivo fijo para la computadora de caseta / monitorista
+
+    const PRIORIDAD = { amarillo: 1, verde: 2, gris: 3, naranja: 4 };
+    const NOMBRE_CODIGO = { amarillo: "🟡 AMARILLO · Proveedor", verde: "🟢 VERDE · Invitación", gris: "⚪ GRIS · Dueño (App)", naranja: "🟧 NARANJA · Dueño (RFID)" };
+
+    // ---------- ARRANQUE SEGÚN ROL ----------
+    document.addEventListener('DOMContentLoaded', () => {
+        if (rol === 'patrullero1' || rol === 'patrullero2') {
+            document.body.classList.add('rol-patrullero');
+            document.getElementById('app-patrullero').classList.add('visible');
+            const zona = rol === 'patrullero1' ? 1 : 2;
+            document.getElementById('patrullero-titulo').innerText = zona === 1 ? '🚓 Patrullero Etapa 1' : '🚓 Patrullero Etapa 2';
+            document.getElementById('patrullero-sub').innerText = zona === 1 ? 'Lotes 1800 – 1999' : 'Lotes 2000 – 2200';
+            window.zonaPatrullero = zona;
+        } else {
+            document.body.classList.add('rol-caseta');
+            document.getElementById('app-caseta').style.display = 'flex';
+            seleccionarCodigo('amarillo');
+        }
+    });
+
+    // ---------- NAVEGACIÓN CASETA ----------
+    window.cambiarPanel = function(idPanel, btnElement) {
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(idPanel).classList.add('active');
+        btnElement.classList.add('active');
+    };
+
+    window.verificarAuditoria = function(btnElement) {
+        const clave = "Accesos2026";
+        let intento = prompt("🔒 ACCESO RESTRINGIDO\nIngrese la contraseña para Auditoría:");
+        if (intento === clave) { cambiarPanel('panel-bitacora', btnElement); }
+        else { alert("❌ Contraseña incorrecta."); }
+    };
+
+    // ---------- SELECCIÓN DE CÓDIGO Y FORMULARIO ADAPTATIVO ----------
+    window.seleccionarCodigo = function(codigo) {
+        codigoActual = codigo;
+        ['amarillo','verde','gris','naranja'].forEach(c => document.getElementById('btn-cod-' + c).classList.remove('activo'));
+        document.getElementById('btn-cod-' + codigo).classList.add('activo');
+
+        document.getElementById('aviso-escolta').classList.toggle('oculto', codigo !== 'amarillo');
+
+        // amarillo y verde -> formulario completo (se registra al 100%)
+        // gris y naranja -> formulario rápido (residente ya validado, solo bitácora discreta)
+        const esRapido = (codigo === 'gris' || codigo === 'naranja');
+        document.getElementById('bloque-completo').classList.toggle('oculto', esRapido);
+        document.getElementById('bloque-rapido').classList.toggle('oculto', !esRapido);
+        document.getElementById('campo-ubicacion').classList.toggle('oculto', esRapido);
+
+        const btn = document.getElementById('btnGuardar');
+        btn.innerText = esRapido ? 'REGISTRAR INGRESO DE RESIDENTE' : 'REGISTRAR ENTRADA EN SISTEMA';
+    };
+
+    function calcularZona(domicilioStr) {
+        const match = (domicilioStr || "").match(/\d+/);
+        if (!match) return null;
+        const num = parseInt(match[0], 10);
+        if (num >= 1800 && num <= 1999) return 1;
+        if (num >= 2000 && num <= 2200) return 2;
+        return null;
+    }
+
+    window.actualizarZona = function() {
+        const domicilio = document.getElementById('reg_domicilio').value;
+        zonaCalculada = calcularZona(domicilio);
+        const el = document.getElementById('zona-preview');
+        if (zonaCalculada === 1) el.innerHTML = '<span class="zona-badge zona-1">📍 Etapa 1 (1800–1999)</span>';
+        else if (zonaCalculada === 2) el.innerHTML = '<span class="zona-badge zona-2">📍 Etapa 2 (2000–2200)</span>';
+        else if (domicilio.trim() === "") el.innerHTML = '';
+        else el.innerHTML = '<span class="zona-badge zona-x">⚠️ No identificado — se notificará a ambos patrulleros</span>';
+    };
+
+    // ---------- FOTO ----------
+    window.procesarFoto = function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = function(e) {
+            const img = new Image();
+            img.src = e.target.result;
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const MAX_WIDTH = 600;
+                let width = img.width, height = img.height;
+                if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
+                canvas.width = width; canvas.height = height;
+                ctx.drawImage(img, 0, 0, width, height);
+                imagenBase64 = canvas.toDataURL('image/jpeg', 0.6);
+                const preview = document.getElementById('preview-foto');
+                preview.src = imagenBase64;
+                preview.style.display = "block";
+            };
+        };
+    };
+
+    // ---------- REGISTRAR ENTRADA ----------
+    window.registrarEntrada = async function() {
+        const btn = document.getElementById('btnGuardar');
+        const domicilio = document.getElementById('reg_domicilio').value || "N/A";
+        const zona = calcularZona(domicilio);
+        const esRapido = (codigoActual === 'gris' || codigoActual === 'naranja');
+
+        const data = {
+            codigo: codigoActual,
+            prioridad: PRIORIDAD[codigoActual],
+            zona: zona, // null si no se pudo determinar -> se muestra en ambas colas
+            escolta_requerida: codigoActual === 'amarillo',
+            reconocido: false,
+            ubicacion: esRapido ? "N/A" : document.getElementById('reg_ubicacion').value,
+            tipo_acceso: esRapido ? (codigoActual === 'naranja' ? 'Dueño (RFID)' : 'Dueño (App)') : document.getElementById('reg_tipo').value,
+            visitante: esRapido ? (document.getElementById('reg_nombre_rapido').value || "Residente") : (document.getElementById('reg_nombre').value || "Desconocido"),
+            domicilio: domicilio,
+            vehiculo: esRapido ? "N/A" : `${document.getElementById('reg_marca').value} ${document.getElementById('reg_color').value}`.trim(),
+            placas: esRapido ? "N/A" : (document.getElementById('reg_placas').value || "S/N"),
+            comentarios: esRapido ? "" : (document.getElementById('reg_comentarios').value || ""),
+            foto_evidencia: esRapido ? "NO" : imagenBase64,
+            timestamp_entrada: new Date().getTime(),
+            fecha_str: new Date().toLocaleDateString('es-MX'),
+            hora_entrada: new Date().toLocaleTimeString('es-MX'),
+            estado: "ADENTRO",
+            escolta: "Ninguna"
+        };
+
+        btn.innerText = "⏳ Sincronizando..."; btn.disabled = true;
+        try {
+            await window.addDoc(window.collection(window.db, "control_maestro_accesos"), data);
+            alert("✅ Ingreso registrado. " + (data.escolta_requerida ? "Se notificó al patrullero para escolta obligatoria." : "Se notificó al patrullero de la zona."));
+            document.querySelectorAll('#panel-registro input[type=text], #panel-registro textarea').forEach(i => i.value = '');
+            document.getElementById('preview-foto').style.display = 'none';
+            document.getElementById('zona-preview').innerHTML = '';
+            imagenBase64 = "NO";
+        } catch (e) {
+            console.error(e); alert("❌ Error de conexión.");
+        }
+        btn.innerText = document.getElementById('btnGuardar').innerText.includes('RESIDENTE') ? 'REGISTRAR INGRESO DE RESIDENTE' : 'REGISTRAR ENTRADA EN SISTEMA';
+        btn.disabled = false;
+    };
+
+    // ---------- LECTURA EN TIEMPO REAL ----------
+    window.onSnapshot(window.query(window.collection(window.db, "control_maestro_accesos"), window.orderBy("timestamp_entrada", "desc")), (snapshot) => {
+        accesosActivos = [];
+        historialCompleto = [];
+        let ingresosHoy = 0, escoltasHoy = 0, sumaTiempos = 0, salidasCompletadas = 0;
+        let hoyStr = new Date().toLocaleDateString('es-MX');
+
+        snapshot.forEach(docSnap => {
+            let data = docSnap.data();
+            data.id = docSnap.id;
+            if (data.prioridad === undefined) data.prioridad = 5; // compatibilidad con registros antiguos sin código
+            historialCompleto.push(data);
+            if (data.estado === "ADENTRO") accesosActivos.push(data);
+            if (data.fecha_str === hoyStr) {
+                ingresosHoy++;
+                if (data.escolta !== "Ninguna") escoltasHoy++;
+            }
+            if (data.estado === "AFUERA" && data.fecha_str === hoyStr) {
+                let minutos = Math.round((data.timestamp_salida - data.timestamp_entrada) / 60000);
+                if (minutos > 0) { sumaTiempos += minutos; salidasCompletadas++; }
+            }
+        });
+
+        accesosActivos.sort((a, b) => a.prioridad - b.prioridad || b.timestamp_entrada - a.timestamp_entrada);
+
+        if (rol === 'caseta') {
+            const elA = document.getElementById('kpi-adentro'); if (elA) elA.innerText = accesosActivos.length;
+            const elH = document.getElementById('kpi-hoy'); if (elH) elH.innerText = ingresosHoy;
+            const elE = document.getElementById('kpi-escoltas'); if (elE) elE.innerText = escoltasHoy;
+            const elT = document.getElementById('kpi-tiempo');
+            if (elT) elT.innerHTML = salidasCompletadas > 0 ? Math.round(sumaTiempos / salidasCompletadas) + ' <span style="font-size:14px;">min</span>' : '0 <span style="font-size:14px;">min</span>';
+            renderizarSalidas();
+            renderizarEscoltas();
+            renderizarBitacora();
+        } else {
+            renderizarColaPatrullero();
+        }
+    });
+
+    // ---------- SALIDAS ----------
+    window.renderizarSalidas = function() {
+        const tbody = document.getElementById('tabla-salidas');
+        if (!tbody) return;
+        const txt = document.getElementById('buscadorSalida').value.toLowerCase();
+        tbody.innerHTML = "";
+        accesosActivos.filter(a => a.visitante.toLowerCase().includes(txt) || a.placas.toLowerCase().includes(txt)).forEach(a => {
+            tbody.innerHTML += `<tr>
+                <td><span class="badge badge-${a.codigo || 'gris'}">${(a.codigo||'N/A').toUpperCase()}</span></td>
+                <td>${a.hora_entrada}</td>
+                <td><b>${a.visitante}</b><br><small>${a.tipo_acceso}</small></td>
+                <td><span class="badge bg-s">${a.placas}</span></td>
+                <td>${a.domicilio}</td>
+                <td><button class="btn-danger" onclick="registrarSalida('${a.id}')">Confirmar Salida</button></td>
+            </tr>`;
+        });
+    };
+
+    window.registrarSalida = async function(id) {
+        if (!confirm("¿Confirmar salida definitiva del parque?")) return;
+        const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+        await window.updateDoc(refDoc, { estado: "AFUERA", timestamp_salida: new Date().getTime(), hora_salida: new Date().toLocaleTimeString('es-MX') });
+    };
+
+    // ---------- ESCOLTAS ----------
+    window.renderizarEscoltas = function() {
+        const select = document.getElementById('esc_proveedor');
+        const tbody = document.getElementById('tabla-escoltas-activas');
+        if (!select || !tbody) return;
+        select.innerHTML = "<option value=''>-- Seleccionar Proveedor --</option>";
+        tbody.innerHTML = "";
+        accesosActivos.forEach(a => {
+            if (a.escolta === "Ninguna") {
+                select.innerHTML += `<option value="${a.id}">${(a.codigo||'').toUpperCase()} · ${a.placas} - ${a.visitante} (${a.domicilio})</option>`;
+            } else {
+                tbody.innerHTML += `<tr><td>${a.visitante}</td><td>${a.domicilio}</td><td><b>${a.escolta}</b></td></tr>`;
+            }
+        });
+    };
+
+    window.asignarEscolta = async function(nombreEscolta) {
+        const id = document.getElementById('esc_proveedor').value;
+        if (!id) { alert("🚨 Selecciona un proveedor primero."); return; }
+        const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+        await window.updateDoc(refDoc, { escolta: nombreEscolta });
+        alert(`✅ ${nombreEscolta} asignada correctamente.`);
+    };
+
+    // ---------- BITÁCORA ----------
+    window.renderizarBitacora = function() {
+        const tbody = document.getElementById('tabla-bitacora');
+        if (!tbody) return;
+        const txt = document.getElementById('buscadorBitacora').value.toLowerCase();
+        tbody.innerHTML = "";
+        historialCompleto.filter(h => h.visitante.toLowerCase().includes(txt) || h.placas.toLowerCase().includes(txt)).forEach(h => {
+            let badgeEstado = h.estado === "ADENTRO" ? '<span class="badge bg-s">ENTRADA (ACTIVO)</span>' : '<span class="badge bg-r">SALIDA CONCLUIDA</span>';
+            let duracion = "En curso...";
+            if (h.estado === "AFUERA") duracion = Math.round((h.timestamp_salida - h.timestamp_entrada) / 60000) + " min";
+            tbody.innerHTML += `<tr>
+                <td><span class="badge badge-${h.codigo || 'gris'}">${(h.codigo||'N/A').toUpperCase()}</span></td>
+                <td>${badgeEstado}</td>
+                <td>${h.fecha_str}<br><small>${h.hora_entrada}</small></td>
+                <td><b>${h.visitante}</b><br><small>${h.tipo_acceso}</small></td>
+                <td>${h.vehiculo} <br><b>${h.placas}</b></td>
+                <td>${h.escolta}</td>
+                <td style="font-weight:bold; color:var(--p);">${duracion}</td>
+            </tr>`;
+        });
+    };
+
+    // ================= VISTA PATRULLERO =================
+    let audioCtx = null;
+    let sonidoActivo = false;
+    let idsYaAvisadosVerde = new Set();
+
+    window.activarSonido = function() {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        sonidoActivo = true;
+        const btn = document.getElementById('btn-activar-sonido');
+        btn.innerText = "🔔 ALERTAS DE AUDIO ACTIVAS";
+        btn.classList.add('ok');
+        reproducirTono(880, 150); // beep de confirmación
+    };
+
+    function reproducirTono(frecuencia, duracionMs) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = frecuencia;
+        gain.gain.value = 0.25;
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start();
+        setTimeout(() => osc.stop(), duracionMs);
+    }
+
+    function alarmaAmarilla() { reproducirTono(1046, 180); setTimeout(() => reproducirTono(1046, 180), 250); setTimeout(() => reproducirTono(1046, 180), 500); }
+    function chimeVerde() { reproducirTono(660, 300); }
+
+    // Revisa cada 3s si hay algo pendiente que suene (amarillo repite mientras no se reconoce)
+    setInterval(() => {
+        if (rol !== 'patrullero1' && rol !== 'patrullero2') return;
+        if (!sonidoActivo) return;
+        const zona = window.zonaPatrullero;
+        const pendientesAmarillo = accesosActivos.filter(a => a.codigo === 'amarillo' && !a.reconocido && (a.zona === zona || a.zona === null));
+        if (pendientesAmarillo.length > 0) alarmaAmarilla();
+    }, 3000);
+
+    window.renderizarColaPatrullero = function() {
+        const zona = window.zonaPatrullero;
+        const cont = document.getElementById('lista-arribos');
+        if (!cont) return;
+
+        // Notificados en Firestore: se muestran los códigos de esta zona (o sin zona identificada -> ambas colas)
+        const propios = accesosActivos.filter(a => a.zona === zona || a.zona === null);
+
+        // Chime único para verde recién detectado
+        propios.forEach(a => {
+            if (a.codigo === 'verde' && !idsYaAvisadosVerde.has(a.id) && sonidoActivo) {
+                chimeVerde();
+                idsYaAvisadosVerde.add(a.id);
+            }
+        });
+
+        if (propios.length === 0) {
+            cont.innerHTML = '<div class="vacio-cola">Sin arribos pendientes en esta etapa.</div>';
+            return;
+        }
+
+        cont.innerHTML = propios.map(a => {
+            const necesitaEscolta = a.codigo === 'amarillo';
+            return `<div class="card-arribo c-${a.codigo || 'gris'} ${a.reconocido ? 'reconocido' : ''}">
+                ${necesitaEscolta ? '<div class="etiqueta-escolta">🚨 IR A CASETA / FILTRO — ESCOLTAR</div>' : ''}
+                <div class="card-titulo">${NOMBRE_CODIGO[a.codigo] || a.codigo || 'SIN CÓDIGO'}</div>
+                <div class="card-sub"><b>Domicilio:</b> ${a.domicilio} &nbsp;|&nbsp; <b>Visitante:</b> ${a.visitante}</div>
+                ${a.placas && a.placas !== 'N/A' ? `<div class="card-sub"><b>Vehículo:</b> ${a.vehiculo} · <b>Placas:</b> ${a.placas}</div>` : ''}
+                <div class="card-sub"><b>Hora:</b> ${a.hora_entrada}</div>
+                <div class="card-accion">
+                    ${!a.reconocido ? `<button class="btn-enterado" onclick="marcarEnterado('${a.id}')">✅ Enterado</button>` : '<div style="color:#555;font-weight:bold;">Reconocido ✔</div>'}
+                </div>
+            </div>`;
+        }).join('');
+    };
+
+    window.marcarEnterado = async function(id) {
+        const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+        await window.updateDoc(refDoc, { reconocido: true });
+    };
+</script>
+</body>
+</html>
