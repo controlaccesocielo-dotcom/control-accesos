@@ -435,7 +435,7 @@
             document.getElementById('zona-preview').innerHTML = '';
             imagenBase64 = "NO";
         } catch (e) {
-            console.error(e); alert("❌ Error de conexión.");
+            console.error(e); alert("❌ ERROR AL REGISTRAR:\n" + e.code + "\n" + e.message);
         }
         btn.innerText = document.getElementById('btnGuardar').innerText.includes('RESIDENTE') ? 'REGISTRAR INGRESO DE RESIDENTE' : 'REGISTRAR ENTRADA EN SISTEMA';
         btn.disabled = false;
@@ -500,8 +500,13 @@
 
     window.registrarSalida = async function(id) {
         if (!confirm("¿Confirmar salida definitiva del parque?")) return;
-        const refDoc = window.doc(window.db, "control_maestro_accesos", id);
-        await window.updateDoc(refDoc, { estado: "AFUERA", timestamp_salida: new Date().getTime(), hora_salida: new Date().toLocaleTimeString('es-MX') });
+        try {
+            const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+            await window.updateDoc(refDoc, { estado: "AFUERA", timestamp_salida: new Date().getTime(), hora_salida: new Date().toLocaleTimeString('es-MX') });
+        } catch (e) {
+            alert("❌ ERROR AL CONFIRMAR SALIDA:\n" + e.code + "\n" + e.message);
+            console.error(e);
+        }
     };
 
     // ---------- ESCOLTAS ----------
@@ -523,9 +528,14 @@
     window.asignarEscolta = async function(nombreEscolta) {
         const id = document.getElementById('esc_proveedor').value;
         if (!id) { alert("🚨 Selecciona un proveedor primero."); return; }
-        const refDoc = window.doc(window.db, "control_maestro_accesos", id);
-        await window.updateDoc(refDoc, { escolta: nombreEscolta });
-        alert(`✅ ${nombreEscolta} asignada correctamente.`);
+        try {
+            const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+            await window.updateDoc(refDoc, { escolta: nombreEscolta });
+            alert(`✅ ${nombreEscolta} asignada correctamente.`);
+        } catch (e) {
+            alert("❌ ERROR AL ASIGNAR ESCOLTA:\n" + e.code + "\n" + e.message);
+            console.error(e);
+        }
     };
 
     // ---------- BITÁCORA ----------
@@ -625,8 +635,13 @@
     };
 
     window.marcarEnterado = async function(id) {
-        const refDoc = window.doc(window.db, "control_maestro_accesos", id);
-        await window.updateDoc(refDoc, { reconocido: true });
+        try {
+            const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+            await window.updateDoc(refDoc, { reconocido: true });
+        } catch (e) {
+            alert("❌ ERROR AL MARCAR ENTERADO:\n" + e.code + "\n" + e.message);
+            console.error(e);
+        }
     };
 </script>
 </body>
