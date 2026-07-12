@@ -7,7 +7,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, updateDoc, doc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, doc, query, orderBy, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCK-45yZZbV5TTVKTBTcJt4iCwKEnWCN0o",
@@ -28,6 +28,7 @@
         window.query = query;
         window.orderBy = orderBy;
         window.onSnapshot = onSnapshot;
+        window.getDocs = getDocs;
     </script>
 
     <style>
@@ -122,6 +123,7 @@
         .card-arribo.c-verde { background: #d5f5e3; }
         .card-arribo.c-gris { background: #ecf0f1; color: #555; }
         .card-arribo.c-naranja { background: #fdebd0; }
+        .card-arribo.c-peatonal { background: #d1f2eb; color: #0b5345; }
         .card-arribo.reconocido { animation: none; opacity: 0.75; }
         @keyframes parpadeo { 0%,100% { box-shadow: 0 0 0px 0px rgba(231,76,60,0.6); } 50% { box-shadow: 0 0 0px 10px rgba(231,76,60,0); } }
 
@@ -300,8 +302,8 @@
 
     const rol = 'patrullero2'; // archivo fijo para el celular del Patrullero Etapa 2
 
-    const PRIORIDAD = { amarillo: 1, verde: 2, gris: 3, naranja: 4 };
-    const NOMBRE_CODIGO = { amarillo: "🟡 AMARILLO · Proveedor", verde: "🟢 VERDE · Invitación", gris: "⚪ GRIS · Dueño (App)", naranja: "🟧 NARANJA · Dueño (RFID)" };
+    const PRIORIDAD = { amarillo: 1, verde: 2, peatonal: 3, gris: 4, naranja: 5 };
+    const NOMBRE_CODIGO = { amarillo: "🟡 AMARILLO · Proveedor", verde: "🟢 VERDE · Invitación", peatonal: "🚶 PEATONAL · Trabajador externo", gris: "⚪ GRIS · Dueño (App)", naranja: "🟧 NARANJA · Dueño (RFID)" };
 
     // ---------- ARRANQUE SEGÚN ROL ----------
     document.addEventListener('DOMContentLoaded', () => {

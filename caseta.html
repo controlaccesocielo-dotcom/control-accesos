@@ -7,7 +7,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, updateDoc, doc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, doc, query, orderBy, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCK-45yZZbV5TTVKTBTcJt4iCwKEnWCN0o",
@@ -28,12 +28,13 @@
         window.query = query;
         window.orderBy = orderBy;
         window.onSnapshot = onSnapshot;
+        window.getDocs = getDocs;
     </script>
 
     <style>
         :root {
             --bg: #f4f7f6; --p: #2c3e50; --s: #3498db; --g: #27ae60; --r: #e74c3c; --w: #fff; --text: #333;
-            --amarillo: #f1c40f; --verde: #2ecc71; --gris: #95a5a6; --naranja: #e67e22;
+            --amarillo: #f1c40f; --verde: #2ecc71; --gris: #95a5a6; --naranja: #e67e22; --peatonal: #16a085;
         }
         * { box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
@@ -80,6 +81,7 @@
         .badge-verde { background: var(--verde); }
         .badge-gris { background: var(--gris); }
         .badge-naranja { background: var(--naranja); }
+        .badge-peatonal { background: var(--peatonal); }
 
         .kpi-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .kpi-card { background: var(--w); border-left: 5px solid var(--s); padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
@@ -91,13 +93,14 @@
         .esc-1 { background: var(--amarillo); color: #000; } .esc-2 { background: var(--naranja); } .esc-3 { background: var(--g); } .esc-4 { background: var(--gris); }
 
         /* ===== SELECTOR DE CODIGO ===== */
-        .codigo-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+        .codigo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 20px; }
         .btn-codigo { padding: 18px 8px; font-weight: bold; border-radius: 8px; cursor: pointer; border: 3px solid transparent; font-size: 0.95em; color: #000; text-align: center; transition: 0.15s; }
         .btn-codigo small { display: block; font-weight: normal; font-size: 0.75em; margin-top: 4px; }
         .btn-codigo.sel-amarillo { background: var(--amarillo); }
         .btn-codigo.sel-verde { background: var(--verde); color: var(--w); }
         .btn-codigo.sel-gris { background: var(--gris); color: var(--w); }
         .btn-codigo.sel-naranja { background: var(--naranja); color: var(--w); }
+        .btn-codigo.sel-peatonal { background: var(--peatonal); color: var(--w); }
         .btn-codigo.activo { border-color: var(--p); transform: scale(1.04); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
 
         .zona-badge { display: inline-block; padding: 6px 14px; border-radius: 20px; font-weight: bold; margin-top: 8px; font-size: 0.85em; }
@@ -145,6 +148,7 @@
         <button class="menu-btn" onclick="verificarAuditoria(this)">📋 Bitácora General</button>
         <button class="menu-btn" onclick="cambiarPanel('panel-rendimiento', this)">📈 Medir Rendimiento</button>
         <button class="menu-btn" onclick="cambiarPanel('panel-enlaces', this)">📱 Enlaces Patrulleros</button>
+        <button class="menu-btn" onclick="cambiarPanel('panel-recorridos', this)">🗺️ Auditoría de Recorridos</button>
         <div class="sidebar-links">Etapa 1: Lotes 1800–1999<br>Etapa 2: Lotes 2000–2200</div>
     </div>
 
@@ -159,6 +163,7 @@
                 <div class="btn-codigo sel-verde" id="btn-cod-verde" onclick="seleccionarCodigo('verde')">🟢 VERDE<small>Invitación</small></div>
                 <div class="btn-codigo sel-gris" id="btn-cod-gris" onclick="seleccionarCodigo('gris')">⚪ GRIS<small>Dueño (App)</small></div>
                 <div class="btn-codigo sel-naranja" id="btn-cod-naranja" onclick="seleccionarCodigo('naranja')">🟧 NARANJA<small>Dueño (RFID)</small></div>
+                <div class="btn-codigo sel-peatonal" id="btn-cod-peatonal" onclick="seleccionarCodigo('peatonal')">🚶 PEATONAL<small>Trabajador externo</small></div>
             </div>
 
             <div id="aviso-escolta" class="aviso-escolta oculto">⚠️ Código AMARILLO: este ingreso se escolta obligatoriamente y se envía al filtro de entrada / caseta. Se notificará de inmediato al patrullero de la etapa correspondiente.</div>
@@ -169,17 +174,17 @@
                     <input type="text" id="reg_domicilio" placeholder="Ej. 1850 o Lote 2045" oninput="actualizarZona()">
                     <div id="zona-preview"></div>
                 </div>
-                <div id="campo-ubicacion">
-                    <label>📍 Ubicación de Caseta</label>
-                    <select id="reg_ubicacion">
-                        <option value="General">General</option>
-                        <option value="Cardones">Cardones</option>
-                        <option value="Fotur">Fotur</option>
-                    </select>
+                <div id="campo-ubicacion" class="oculto">
+                <label>📍 Ubicación de Caseta</label>
+                <select id="reg_ubicacion">
+                    <option value="General">General</option>
+                    <option value="Cardones">Cardones</option>
+                    <option value="Fotur">Fotur</option>
+                </select>
                 </div>
             </div>
 
-            <div id="bloque-completo">
+            <div id="bloque-avanzado" class="oculto">
                 <div class="grid-2">
                     <div><label>👷 Tipo de Acceso</label>
                         <select id="reg_tipo">
@@ -192,13 +197,38 @@
                     </div>
                     <div><label>👤 Nombre Completo</label><input type="text" id="reg_nombre" placeholder="Nombre del conductor / visitante"></div>
                 </div>
+            </div>
 
+            <div id="bloque-vehiculo">
                 <div class="grid-3">
                     <div><label>🚗 Marca Vehículo</label><input type="text" id="reg_marca" placeholder="Ej. Nissan"></div>
-                    <div><label>🎨 Color</label><input type="text" id="reg_color" placeholder="Ej. Blanco"></div>
+                    <div><label>🚘 Modelo</label><input type="text" id="reg_modelo" placeholder="Ej. Sentra 2020"></div>
                     <div><label>🔢 Placas</label><input type="text" id="reg_placas" placeholder="ABC-123" style="text-transform: uppercase;"></div>
                 </div>
+            </div>
 
+            <div id="bloque-peatonal" class="oculto">
+                <div class="grid-2">
+                    <div>
+                        <label>👤 Nombre Completo</label>
+                        <input type="text" id="reg_nombre_peatonal" placeholder="Nombre del trabajador" list="datalist-peatonal">
+                        <datalist id="datalist-peatonal"></datalist>
+                    </div>
+                    <div>
+                        <label>🧹 Función que Realiza</label>
+                        <select id="reg_funcion">
+                            <option value="Aseo / Limpieza">Aseo / Limpieza</option>
+                            <option value="Lavado de Autos">Lavado de Autos</option>
+                            <option value="Jardinería">Jardinería</option>
+                            <option value="Mantenimiento">Mantenimiento</option>
+                            <option value="Repartidor a pie">Repartidor a pie</option>
+                            <option value="Otro">Otro</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="bloque-solo-amarillo" class="oculto">
                 <label>📝 Comentarios / Novedades</label>
                 <textarea id="reg_comentarios" placeholder="Materiales, daños en vehículo, etc."></textarea>
 
@@ -208,11 +238,6 @@
                     <input type="file" id="foto_id" accept="image/*" capture="environment" onchange="procesarFoto(event)">
                 </div>
                 <img id="preview-foto" src="">
-            </div>
-
-            <div id="bloque-rapido" class="oculto">
-                <label>👤 Nombre (opcional)</label>
-                <input type="text" id="reg_nombre_rapido" placeholder="Nombre del residente / visitante">
             </div>
 
             <button id="btnGuardar" class="btn-main" onclick="registrarEntrada()">REGISTRAR ENTRADA EN SISTEMA</button>
@@ -284,6 +309,15 @@
             <p style="margin-top:20px; font-size:0.85em; color:#7f8c8d;">Coloca los tres archivos juntos en la misma carpeta que sirvas con Servez. El patrullero solo escanea el QR, entra a la carpeta y toca su archivo correspondiente — no necesita escribir nada más en la URL.</p>
         </div>
 
+        <div id="panel-recorridos" class="panel">
+            <h3 class="title">🗺️ AUDITORÍA DE RECORRIDOS (Código Amarillo)</h3>
+            <input type="text" id="buscadorRecorridos" placeholder="🔍 Buscar por nombre, domicilio o placa..." oninput="renderizarAuditoriaRecorridos()" style="margin-bottom: 15px;">
+            <table>
+                <thead><tr><th>Fecha</th><th>Proveedor</th><th>Domicilio</th><th>Inicio</th><th>Duración</th><th>Ruta</th></tr></thead>
+                <tbody id="tabla-recorridos-auditoria"></tbody>
+            </table>
+        </div>
+
     </div>
 </div>
 
@@ -307,8 +341,8 @@
 
     const rol = 'caseta'; // archivo fijo para la computadora de caseta / monitorista
 
-    const PRIORIDAD = { amarillo: 1, verde: 2, gris: 3, naranja: 4 };
-    const NOMBRE_CODIGO = { amarillo: "🟡 AMARILLO · Proveedor", verde: "🟢 VERDE · Invitación", gris: "⚪ GRIS · Dueño (App)", naranja: "🟧 NARANJA · Dueño (RFID)" };
+    const PRIORIDAD = { amarillo: 1, verde: 2, peatonal: 3, gris: 4, naranja: 5 };
+    const NOMBRE_CODIGO = { amarillo: "🟡 AMARILLO · Proveedor", verde: "🟢 VERDE · Invitación", peatonal: "🚶 PEATONAL · Trabajador externo", gris: "⚪ GRIS · Dueño (App)", naranja: "🟧 NARANJA · Dueño (RFID)" };
 
     // ---------- ARRANQUE SEGÚN ROL ----------
     document.addEventListener('DOMContentLoaded', () => {
@@ -344,21 +378,26 @@
     // ---------- SELECCIÓN DE CÓDIGO Y FORMULARIO ADAPTATIVO ----------
     window.seleccionarCodigo = function(codigo) {
         codigoActual = codigo;
-        ['amarillo','verde','gris','naranja'].forEach(c => document.getElementById('btn-cod-' + c).classList.remove('activo'));
+        ['amarillo','verde','gris','naranja','peatonal'].forEach(c => document.getElementById('btn-cod-' + c).classList.remove('activo'));
         document.getElementById('btn-cod-' + codigo).classList.add('activo');
 
         document.getElementById('aviso-escolta').classList.toggle('oculto', codigo !== 'amarillo');
 
-        // amarillo y verde -> formulario completo (se registra al 100%)
-        // gris y naranja -> formulario rápido (residente ya validado, solo bitácora discreta)
-        const esRapido = (codigo === 'gris' || codigo === 'naranja');
-        document.getElementById('bloque-completo').classList.toggle('oculto', esRapido);
-        document.getElementById('bloque-rapido').classList.toggle('oculto', !esRapido);
-        document.getElementById('campo-ubicacion').classList.toggle('oculto', esRapido);
+        // Solo AMARILLO requiere datos completos (tipo, nombre, comentarios, foto, ubicación de caseta).
+        // VERDE, GRIS y NARANJA piden domicilio + datos del vehículo (marca, modelo, placas).
+        // PEATONAL (trabajadores externos a pie) pide domicilio + nombre + función, sin datos de vehículo.
+        const esAmarillo = (codigo === 'amarillo');
+        const esPeatonal = (codigo === 'peatonal');
+        document.getElementById('bloque-avanzado').classList.toggle('oculto', !esAmarillo);
+        document.getElementById('bloque-solo-amarillo').classList.toggle('oculto', !esAmarillo);
+        document.getElementById('campo-ubicacion').classList.toggle('oculto', !esAmarillo);
+        document.getElementById('bloque-vehiculo').classList.toggle('oculto', esPeatonal);
+        document.getElementById('bloque-peatonal').classList.toggle('oculto', !esPeatonal);
 
         const btn = document.getElementById('btnGuardar');
-        btn.innerText = esRapido ? 'REGISTRAR INGRESO DE RESIDENTE' : 'REGISTRAR ENTRADA EN SISTEMA';
+        btn.innerText = esAmarillo ? 'REGISTRAR ENTRADA EN SISTEMA' : 'REGISTRAR INGRESO EN SISTEMA';
     };
+
 
     function calcularZona(domicilioStr) {
         const match = (domicilioStr || "").match(/\d+/);
@@ -409,22 +448,26 @@
         const btn = document.getElementById('btnGuardar');
         const domicilio = document.getElementById('reg_domicilio').value || "N/A";
         const zona = calcularZona(domicilio);
-        const esRapido = (codigoActual === 'gris' || codigoActual === 'naranja');
+        const esAmarillo = (codigoActual === 'amarillo');
+        const esPeatonal = (codigoActual === 'peatonal');
+
+        const NOMBRE_TIPO = { verde: 'Invitación', gris: 'Dueño (App)', naranja: 'Dueño (RFID)' };
+        const NOMBRE_VISITANTE = { verde: 'Invitado', gris: 'Residente (App)', naranja: 'Residente (RFID)' };
 
         const data = {
             codigo: codigoActual,
             prioridad: PRIORIDAD[codigoActual],
             zona: zona, // null si no se pudo determinar -> se muestra en ambas colas
-            escolta_requerida: codigoActual === 'amarillo',
+            escolta_requerida: esAmarillo,
             reconocido: false,
-            ubicacion: esRapido ? "N/A" : document.getElementById('reg_ubicacion').value,
-            tipo_acceso: esRapido ? (codigoActual === 'naranja' ? 'Dueño (RFID)' : 'Dueño (App)') : document.getElementById('reg_tipo').value,
-            visitante: esRapido ? (document.getElementById('reg_nombre_rapido').value || "Residente") : (document.getElementById('reg_nombre').value || "Desconocido"),
+            ubicacion: esAmarillo ? document.getElementById('reg_ubicacion').value : "N/A",
+            tipo_acceso: esAmarillo ? document.getElementById('reg_tipo').value : (esPeatonal ? document.getElementById('reg_funcion').value : NOMBRE_TIPO[codigoActual]),
+            visitante: esAmarillo ? (document.getElementById('reg_nombre').value || "Desconocido") : (esPeatonal ? (document.getElementById('reg_nombre_peatonal').value || "Trabajador externo") : NOMBRE_VISITANTE[codigoActual]),
             domicilio: domicilio,
-            vehiculo: esRapido ? "N/A" : `${document.getElementById('reg_marca').value} ${document.getElementById('reg_color').value}`.trim(),
-            placas: esRapido ? "N/A" : (document.getElementById('reg_placas').value || "S/N"),
-            comentarios: esRapido ? "" : (document.getElementById('reg_comentarios').value || ""),
-            foto_evidencia: esRapido ? "NO" : imagenBase64,
+            vehiculo: esPeatonal ? "N/A (acceso a pie)" : (`${document.getElementById('reg_marca').value} ${document.getElementById('reg_modelo').value}`.trim() || "N/A"),
+            placas: esPeatonal ? "N/A" : (document.getElementById('reg_placas').value || "S/N"),
+            comentarios: esAmarillo ? (document.getElementById('reg_comentarios').value || "") : "",
+            foto_evidencia: esAmarillo ? imagenBase64 : "NO",
             timestamp_entrada: new Date().getTime(),
             fecha_str: new Date().toLocaleDateString('es-MX'),
             hora_entrada: new Date().toLocaleTimeString('es-MX'),
@@ -435,7 +478,7 @@
         btn.innerText = "⏳ Sincronizando..."; btn.disabled = true;
         try {
             await window.addDoc(window.collection(window.db, "control_maestro_accesos"), data);
-            alert("✅ Ingreso registrado. " + (data.escolta_requerida ? "Se notificó al patrullero para escolta obligatoria." : "Se notificó al patrullero de la zona."));
+            alert("✅ Ingreso registrado. " + (data.escolta_requerida ? "Se notificó al patrullero para escolta obligatoria." : "Se notificó al patrullero de la zona (confirmación a distancia)."));
             document.querySelectorAll('#panel-registro input[type=text], #panel-registro textarea').forEach(i => i.value = '');
             document.getElementById('preview-foto').style.display = 'none';
             document.getElementById('zona-preview').innerHTML = '';
@@ -443,8 +486,9 @@
         } catch (e) {
             console.error(e); alert("❌ ERROR AL REGISTRAR:\n" + e.code + "\n" + e.message);
         }
-        btn.innerText = document.getElementById('btnGuardar').innerText.includes('RESIDENTE') ? 'REGISTRAR INGRESO DE RESIDENTE' : 'REGISTRAR ENTRADA EN SISTEMA';
+        btn.innerText = document.getElementById('btnGuardar').innerText;
         btn.disabled = false;
+        seleccionarCodigo(codigoActual); // restaura el texto correcto del botón según el código activo
     };
 
     // ---------- LECTURA EN TIEMPO REAL ----------
@@ -482,6 +526,8 @@
             renderizarEscoltas();
             renderizarBitacora();
             renderizarRecorridosGPS();
+            renderizarAuditoriaRecorridos();
+            actualizarDatalistPeatonal();
         } else {
             renderizarColaPatrullero();
         }
@@ -530,6 +576,21 @@
                 tbody.innerHTML += `<tr><td>${a.visitante}</td><td>${a.domicilio}</td><td><b>${a.escolta}</b></td></tr>`;
             }
         });
+    };
+
+    // ---------- SUGERENCIA OPERATIVA: nombres frecuentes de peatonales ----------
+    // Como aseo, lavado de autos, jardineros, etc. suelen ser las mismas personas
+    // visitando el residencial de forma regular, el sistema recuerda automáticamente
+    // los nombres ya registrados como PEATONAL para que el monitorista solo tenga que
+    // empezar a escribir y elegir de la lista, en vez de teclear todo de nuevo cada vez.
+    window.actualizarDatalistPeatonal = function() {
+        const datalist = document.getElementById('datalist-peatonal');
+        if (!datalist) return;
+        const nombres = new Set();
+        historialCompleto.forEach(h => {
+            if (h.codigo === 'peatonal' && h.visitante && h.visitante !== 'Trabajador externo') nombres.add(h.visitante);
+        });
+        datalist.innerHTML = Array.from(nombres).sort().map(n => `<option value="${n}">`).join('');
     };
 
     window.asignarEscolta = async function(nombreEscolta) {
@@ -584,6 +645,62 @@
             }
         });
     }, 1000);
+
+    // ---------- AUDITORÍA DE RECORRIDOS (historial completo) ----------
+    window.renderizarAuditoriaRecorridos = function() {
+        const tbody = document.getElementById('tabla-recorridos-auditoria');
+        if (!tbody) return;
+        const txt = (document.getElementById('buscadorRecorridos').value || '').toLowerCase();
+        const completados = historialCompleto.filter(h => h.recorrido_finalizado &&
+            (h.visitante.toLowerCase().includes(txt) || h.domicilio.toLowerCase().includes(txt) || (h.placas || '').toLowerCase().includes(txt))
+        ).sort((a, b) => (b.recorrido_inicio_ts || 0) - (a.recorrido_inicio_ts || 0));
+
+        if (completados.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#95a5a6;">Sin recorridos completados todavía.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = completados.map(h => {
+            const horaInicio = h.recorrido_inicio_ts ? new Date(h.recorrido_inicio_ts).toLocaleTimeString('es-MX') : '—';
+            return `<tr>
+                <td>${h.fecha_str}</td>
+                <td><b>${h.visitante}</b><br><small>${h.placas || ''}</small></td>
+                <td>${h.domicilio}</td>
+                <td>${horaInicio}</td>
+                <td style="font-weight:bold; color:var(--p);">${h.recorrido_duracion_min || '?'} min</td>
+                <td><button class="btn-danger" style="background:var(--s);" onclick="verRutaRecorrido('${h.id}')">🗺️ Ver Ruta</button></td>
+            </tr>`;
+        }).join('');
+    };
+
+    window.verRutaRecorrido = async function(id) {
+        try {
+            const item = historialCompleto.find(x => x.id === id);
+            const snap = await window.getDocs(window.query(window.collection(window.db, "control_maestro_accesos", id, "gps_puntos"), window.orderBy("ts")));
+            let puntos = [];
+            snap.forEach(d => { const p = d.data(); puntos.push(`${p.lat},${p.lng}`); });
+
+            // Si no hay puntos intermedios, usar al menos inicio y arribo si existen
+            if (puntos.length === 0 && item) {
+                if (item.recorrido_inicio_lat) puntos.push(`${item.recorrido_inicio_lat},${item.recorrido_inicio_lng}`);
+                if (item.recorrido_arribo_lat) puntos.push(`${item.recorrido_arribo_lat},${item.recorrido_arribo_lng}`);
+            }
+
+            if (puntos.length === 0) {
+                alert("⚠️ No se encontraron puntos GPS registrados para este recorrido.");
+                return;
+            }
+            if (puntos.length === 1) {
+                window.open(`https://www.google.com/maps?q=${puntos[0]}`, '_blank');
+                return;
+            }
+            const url = `https://www.google.com/maps/dir/${puntos.join('/')}`;
+            window.open(url, '_blank');
+        } catch (e) {
+            alert("❌ ERROR AL CARGAR LA RUTA:\n" + e.code + "\n" + e.message);
+            console.error(e);
+        }
+    };
 
     // ---------- BITÁCORA ----------
     window.renderizarBitacora = function() {
