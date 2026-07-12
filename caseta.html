@@ -244,6 +244,12 @@
                 <thead><tr><th>Proveedor</th><th>Destino</th><th>Escolta Asignada</th></tr></thead>
                 <tbody id="tabla-escoltas-activas"></tbody>
             </table>
+
+            <h4 style="margin-top: 30px;">🚗 Recorridos GPS en Curso (Código Amarillo):</h4>
+            <table>
+                <thead><tr><th>Proveedor</th><th>Domicilio</th><th>Tiempo Transcurrido</th><th>Última Ubicación</th></tr></thead>
+                <tbody id="tabla-recorridos-gps"></tbody>
+            </table>
         </div>
 
         <div id="panel-bitacora" class="panel">
@@ -475,6 +481,7 @@
             renderizarSalidas();
             renderizarEscoltas();
             renderizarBitacora();
+            renderizarRecorridosGPS();
         } else {
             renderizarColaPatrullero();
         }
@@ -538,6 +545,46 @@
         }
     };
 
+    // ---------- RECORRIDOS GPS (solo caseta) ----------
+    window.renderizarRecorridosGPS = function() {
+        const tbody = document.getElementById('tabla-recorridos-gps');
+        if (!tbody) return;
+        const enCurso = accesosActivos.filter(a => a.codigo === 'amarillo' && a.recorrido_iniciado && !a.recorrido_finalizado);
+        if (enCurso.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#95a5a6;">Sin recorridos activos en este momento.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = enCurso.map(a => {
+            const seg = Math.floor((new Date().getTime() - a.recorrido_inicio_ts) / 1000);
+            const mm = String(Math.floor(seg / 60)).padStart(2, '0');
+            const ss = String(seg % 60).padStart(2, '0');
+            let ubicacionHtml = 'Sin señal aún';
+            if (a.ultima_posicion) {
+                ubicacionHtml = `<a href="https://www.google.com/maps?q=${a.ultima_posicion.lat},${a.ultima_posicion.lng}" target="_blank">📍 Ver en Maps</a>`;
+            }
+            return `<tr>
+                <td><b>${a.visitante}</b></td>
+                <td>${a.domicilio}</td>
+                <td id="gps-timer-${a.id}" style="font-weight:bold; color:var(--r);">⏱️ ${mm}:${ss}</td>
+                <td>${ubicacionHtml}</td>
+            </tr>`;
+        }).join('');
+    };
+
+    setInterval(() => {
+        if (rol !== 'caseta') return;
+        document.querySelectorAll('[id^="gps-timer-"]').forEach(el => {
+            const id = el.id.replace('gps-timer-', '');
+            const item = accesosActivos.find(x => x.id === id);
+            if (item && item.recorrido_inicio_ts) {
+                const seg = Math.floor((new Date().getTime() - item.recorrido_inicio_ts) / 1000);
+                const mm = String(Math.floor(seg / 60)).padStart(2, '0');
+                const ss = String(seg % 60).padStart(2, '0');
+                el.innerText = `⏱️ ${mm}:${ss}`;
+            }
+        });
+    }, 1000);
+
     // ---------- BITÁCORA ----------
     window.renderizarBitacora = function() {
         const tbody = document.getElementById('tabla-bitacora');
@@ -554,7 +601,7 @@
                 <td>${h.fecha_str}<br><small>${h.hora_entrada}</small></td>
                 <td><b>${h.visitante}</b><br><small>${h.tipo_acceso}</small></td>
                 <td>${h.vehiculo} <br><b>${h.placas}</b></td>
-                <td>${h.escolta}</td>
+                <td>${h.escolta}${h.recorrido_finalizado ? `<br><small>🚗 Recorrido: ${h.recorrido_duracion_min} min</small>` : ''}</td>
                 <td style="font-weight:bold; color:var(--p);">${duracion}</td>
             </tr>`;
         });
@@ -643,6 +690,87 @@
             console.error(e);
         }
     };
+
+    // ================= RECORRIDO DE ESCOLTA (GPS) =================
+    let watchIds = {}; // id documento -> watchPosition id
+    let timersRecorrido = {}; // id documento -> elemento a actualizar
+
+    window.iniciarRecorrido = async function(id) {
+        if (!navigator.geolocation) { alert("Este celular/navegador no soporta GPS."); return; }
+        try {
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                try {
+                    const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+                    await window.updateDoc(refDoc, {
+                        recorrido_iniciado: true,
+                        recorrido_finalizado: false,
+                        recorrido_inicio_ts: new Date().getTime(),
+                        recorrido_inicio_lat: pos.coords.latitude,
+                        recorrido_inicio_lng: pos.coords.longitude
+                    });
+                    // Empezar a rastrear posición
+                    watchIds[id] = navigator.geolocation.watchPosition(async (p) => {
+                        try {
+                            const r = window.doc(window.db, "control_maestro_accesos", id);
+                            await window.updateDoc(r, { ultima_posicion: { lat: p.coords.latitude, lng: p.coords.longitude, ts: new Date().getTime() } });
+                            await window.addDoc(window.collection(window.db, "control_maestro_accesos", id, "gps_puntos"), {
+                                lat: p.coords.latitude, lng: p.coords.longitude, ts: new Date().getTime()
+                            });
+                        } catch (e) { console.error("Error guardando GPS:", e); }
+                    }, (err) => { console.error("Error de GPS:", err); }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
+                } catch (e) {
+                    alert("❌ ERROR AL INICIAR RECORRIDO:\n" + e.code + "\n" + e.message);
+                    console.error(e);
+                }
+            }, (err) => {
+                alert("⚠️ No se pudo obtener tu ubicación. Verifica que el GPS y los permisos de ubicación estén activos.\n" + err.message);
+            }, { enableHighAccuracy: true, timeout: 15000 });
+        } catch (e) {
+            alert("❌ ERROR AL INICIAR RECORRIDO:\n" + e.message);
+        }
+    };
+
+    window.confirmarArribo = async function(id) {
+        if (!navigator.geolocation) { alert("Este celular/navegador no soporta GPS."); return; }
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            try {
+                if (watchIds[id] !== undefined) { navigator.geolocation.clearWatch(watchIds[id]); delete watchIds[id]; }
+                const item = accesosActivos.find(x => x.id === id);
+                const inicioTs = item && item.recorrido_inicio_ts ? item.recorrido_inicio_ts : new Date().getTime();
+                const finTs = new Date().getTime();
+                const minutos = Math.max(0, Math.round((finTs - inicioTs) / 60000));
+                const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+                await window.updateDoc(refDoc, {
+                    recorrido_finalizado: true,
+                    recorrido_fin_ts: finTs,
+                    recorrido_duracion_min: minutos,
+                    recorrido_arribo_lat: pos.coords.latitude,
+                    recorrido_arribo_lng: pos.coords.longitude
+                });
+                alert(`✅ Arribo confirmado. Duración del recorrido: ${minutos} min.`);
+            } catch (e) {
+                alert("❌ ERROR AL CONFIRMAR ARRIBO:\n" + e.code + "\n" + e.message);
+                console.error(e);
+            }
+        }, (err) => {
+            alert("⚠️ No se pudo obtener tu ubicación para confirmar el arribo.\n" + err.message);
+        }, { enableHighAccuracy: true, timeout: 15000 });
+    };
+
+    // Cronómetro en vivo para recorridos activos
+    setInterval(() => {
+        accesosActivos.forEach(a => {
+            if (a.recorrido_iniciado && !a.recorrido_finalizado) {
+                const el = document.getElementById('timer-' + a.id);
+                if (el) {
+                    const seg = Math.floor((new Date().getTime() - a.recorrido_inicio_ts) / 1000);
+                    const mm = String(Math.floor(seg / 60)).padStart(2, '0');
+                    const ss = String(seg % 60).padStart(2, '0');
+                    el.innerText = `⏱️ En camino: ${mm}:${ss}`;
+                }
+            }
+        });
+    }, 1000);
 </script>
 </body>
 </html>

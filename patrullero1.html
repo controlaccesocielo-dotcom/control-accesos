@@ -623,14 +623,31 @@
 
         cont.innerHTML = propios.map(a => {
             const necesitaEscolta = a.codigo === 'amarillo';
+
+            let accionHtml = '';
+            if (!a.reconocido) {
+                accionHtml = `<button class="btn-enterado" onclick="marcarEnterado('${a.id}')">✅ Enterado</button>`;
+            } else if (necesitaEscolta && !a.recorrido_iniciado) {
+                accionHtml = `<button class="btn-enterado" style="background:#c0392b;" onclick="iniciarRecorrido('${a.id}')">🚀 Recoger e Iniciar Recorrido</button>`;
+            } else if (necesitaEscolta && a.recorrido_iniciado && !a.recorrido_finalizado) {
+                accionHtml = `<div style="width:100%;">
+                    <div id="timer-${a.id}" style="text-align:center; font-weight:bold; font-size:1.1em; margin-bottom:8px; color:#c0392b;">⏱️ En camino</div>
+                    <button class="btn-enterado" onclick="confirmarArribo('${a.id}')">✅ Confirmar Arribo al Domicilio</button>
+                </div>`;
+            } else if (necesitaEscolta && a.recorrido_finalizado) {
+                accionHtml = `<div style="color:#196f3d; font-weight:bold;">✅ Arribo confirmado — ${a.recorrido_duracion_min || '?'} min</div>`;
+            } else {
+                accionHtml = '<div style="color:#555;font-weight:bold;">Reconocido ✔</div>';
+            }
+
             return `<div class="card-arribo c-${a.codigo || 'gris'} ${a.reconocido ? 'reconocido' : ''}">
-                ${necesitaEscolta ? '<div class="etiqueta-escolta">🚨 IR A CASETA / FILTRO — ESCOLTAR</div>' : ''}
+                ${necesitaEscolta && !a.recorrido_finalizado ? '<div class="etiqueta-escolta">🚨 IR A CASETA / FILTRO — ESCOLTAR</div>' : ''}
                 <div class="card-titulo">${NOMBRE_CODIGO[a.codigo] || a.codigo || 'SIN CÓDIGO'}</div>
                 <div class="card-sub"><b>Domicilio:</b> ${a.domicilio} &nbsp;|&nbsp; <b>Visitante:</b> ${a.visitante}</div>
                 ${a.placas && a.placas !== 'N/A' ? `<div class="card-sub"><b>Vehículo:</b> ${a.vehiculo} · <b>Placas:</b> ${a.placas}</div>` : ''}
                 <div class="card-sub"><b>Hora:</b> ${a.hora_entrada}</div>
                 <div class="card-accion">
-                    ${!a.reconocido ? `<button class="btn-enterado" onclick="marcarEnterado('${a.id}')">✅ Enterado</button>` : '<div style="color:#555;font-weight:bold;">Reconocido ✔</div>'}
+                    ${accionHtml}
                 </div>
             </div>`;
         }).join('');
@@ -645,6 +662,87 @@
             console.error(e);
         }
     };
+
+    // ================= RECORRIDO DE ESCOLTA (GPS) =================
+    let watchIds = {}; // id documento -> watchPosition id
+    let timersRecorrido = {}; // id documento -> elemento a actualizar
+
+    window.iniciarRecorrido = async function(id) {
+        if (!navigator.geolocation) { alert("Este celular/navegador no soporta GPS."); return; }
+        try {
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                try {
+                    const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+                    await window.updateDoc(refDoc, {
+                        recorrido_iniciado: true,
+                        recorrido_finalizado: false,
+                        recorrido_inicio_ts: new Date().getTime(),
+                        recorrido_inicio_lat: pos.coords.latitude,
+                        recorrido_inicio_lng: pos.coords.longitude
+                    });
+                    // Empezar a rastrear posición
+                    watchIds[id] = navigator.geolocation.watchPosition(async (p) => {
+                        try {
+                            const r = window.doc(window.db, "control_maestro_accesos", id);
+                            await window.updateDoc(r, { ultima_posicion: { lat: p.coords.latitude, lng: p.coords.longitude, ts: new Date().getTime() } });
+                            await window.addDoc(window.collection(window.db, "control_maestro_accesos", id, "gps_puntos"), {
+                                lat: p.coords.latitude, lng: p.coords.longitude, ts: new Date().getTime()
+                            });
+                        } catch (e) { console.error("Error guardando GPS:", e); }
+                    }, (err) => { console.error("Error de GPS:", err); }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
+                } catch (e) {
+                    alert("❌ ERROR AL INICIAR RECORRIDO:\n" + e.code + "\n" + e.message);
+                    console.error(e);
+                }
+            }, (err) => {
+                alert("⚠️ No se pudo obtener tu ubicación. Verifica que el GPS y los permisos de ubicación estén activos.\n" + err.message);
+            }, { enableHighAccuracy: true, timeout: 15000 });
+        } catch (e) {
+            alert("❌ ERROR AL INICIAR RECORRIDO:\n" + e.message);
+        }
+    };
+
+    window.confirmarArribo = async function(id) {
+        if (!navigator.geolocation) { alert("Este celular/navegador no soporta GPS."); return; }
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            try {
+                if (watchIds[id] !== undefined) { navigator.geolocation.clearWatch(watchIds[id]); delete watchIds[id]; }
+                const item = accesosActivos.find(x => x.id === id);
+                const inicioTs = item && item.recorrido_inicio_ts ? item.recorrido_inicio_ts : new Date().getTime();
+                const finTs = new Date().getTime();
+                const minutos = Math.max(0, Math.round((finTs - inicioTs) / 60000));
+                const refDoc = window.doc(window.db, "control_maestro_accesos", id);
+                await window.updateDoc(refDoc, {
+                    recorrido_finalizado: true,
+                    recorrido_fin_ts: finTs,
+                    recorrido_duracion_min: minutos,
+                    recorrido_arribo_lat: pos.coords.latitude,
+                    recorrido_arribo_lng: pos.coords.longitude
+                });
+                alert(`✅ Arribo confirmado. Duración del recorrido: ${minutos} min.`);
+            } catch (e) {
+                alert("❌ ERROR AL CONFIRMAR ARRIBO:\n" + e.code + "\n" + e.message);
+                console.error(e);
+            }
+        }, (err) => {
+            alert("⚠️ No se pudo obtener tu ubicación para confirmar el arribo.\n" + err.message);
+        }, { enableHighAccuracy: true, timeout: 15000 });
+    };
+
+    // Cronómetro en vivo para recorridos activos
+    setInterval(() => {
+        accesosActivos.forEach(a => {
+            if (a.recorrido_iniciado && !a.recorrido_finalizado) {
+                const el = document.getElementById('timer-' + a.id);
+                if (el) {
+                    const seg = Math.floor((new Date().getTime() - a.recorrido_inicio_ts) / 1000);
+                    const mm = String(Math.floor(seg / 60)).padStart(2, '0');
+                    const ss = String(seg % 60).padStart(2, '0');
+                    el.innerText = `⏱️ En camino: ${mm}:${ss}`;
+                }
+            }
+        });
+    }, 1000);
 </script>
 </body>
 </html>
