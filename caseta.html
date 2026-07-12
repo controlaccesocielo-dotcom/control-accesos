@@ -39,7 +39,7 @@
         * { box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
         body.rol-caseta { display: flex; height: 100vh; overflow: hidden; }
-        #app-caseta { display: none; }
+        #app-caseta { display: flex; }
 
         /* ===== SIDEBAR (CASETA) ===== */
         .sidebar { width: 250px; background: var(--p); color: var(--w); display: flex; flex-direction: column; padding: 20px 0; flex-shrink: 0; }
@@ -110,6 +110,7 @@
 
         .oculto { display: none !important; }
         .aviso-escolta { background: #fef9e7; border: 2px solid var(--amarillo); border-radius: 8px; padding: 12px; margin-bottom: 15px; font-weight: bold; color: #7d6608; }
+        #app-patrullero { display: none; }
 
         /* ===== VISTA PATRULLERO (CELULAR) ===== */
         #app-patrullero { display: none; min-height: 100vh; padding: 14px; }
@@ -138,6 +139,7 @@
         /* ===== RESPONSIVO: CELULAR DEL MONITORISTA ===== */
         @media (max-width: 820px) {
             body.rol-caseta { flex-direction: column; height: auto; min-height: 100vh; overflow-x: hidden; overflow-y: auto; }
+            #app-caseta { flex-direction: column; height: auto; min-height: 100vh; }
 
             .sidebar {
                 width: 100%; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
