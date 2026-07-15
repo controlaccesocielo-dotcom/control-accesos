@@ -387,18 +387,40 @@
         let unsubscribeActual = null; // permite cancelar el "escuchar en vivo" anterior al cambiar de turno/sector
 
         // ---------- CÁLCULO DE TURNOS (con cruce de medianoche para el nocturno) ----------
+        // NOTA: el inicio de la consulta se ensancha 1 hora hacia atrás para capturar
+        // check-ins tempranos (reglamento: hasta 1h antes, 15 min de tolerancia después).
+        // La clasificación real de a qué turno pertenece cada ENTRADA/SALIDA se hace
+        // aparte, por cercanía al horario oficial (ver turnoMasCercano), no por este rango.
         function calcularRangoTurno(fechaBase, turnoId) {
             const y = fechaBase.getFullYear(), m = fechaBase.getMonth(), d = fechaBase.getDate();
             if (turnoId === 1) {
-                return { inicio: new Date(y, m, d, 7, 0, 0, 0).getTime(), fin: new Date(y, m, d, 14, 59, 59, 999).getTime() };
+                return { inicio: new Date(y, m, d, 6, 0, 0, 0).getTime(), fin: new Date(y, m, d, 14, 59, 59, 999).getTime() };
             } else if (turnoId === 2) {
-                return { inicio: new Date(y, m, d, 15, 0, 0, 0).getTime(), fin: new Date(y, m, d, 22, 59, 59, 999).getTime() };
+                return { inicio: new Date(y, m, d, 14, 0, 0, 0).getTime(), fin: new Date(y, m, d, 22, 59, 59, 999).getTime() };
             } else {
-                // Turno 3 (nocturno): inicia 23:00 del día base, termina 07:00 del día siguiente
-                const inicio = new Date(y, m, d, 23, 0, 0, 0).getTime();
+                // Turno 3 (nocturno): margen desde 22:00 del día base, termina 07:00 del día siguiente
+                const inicio = new Date(y, m, d, 22, 0, 0, 0).getTime();
                 const fin = new Date(y, m, d + 1, 6, 59, 59, 999).getTime();
                 return { inicio, fin };
             }
+        }
+
+        const HORA_OFICIAL_TURNO = { 1: 7, 2: 15, 3: 23 };
+
+        // Determina a qué turno pertenece REALMENTE un registro, por cercanía al horario
+        // oficial (07:00 / 15:00 / 23:00) en un reloj circular de 24h — así una entrada a
+        // las 6:10am se reconoce como Turno 1 (50 min antes) y no como cola del Turno 3
+        // (que estaría a más de 7 horas de distancia).
+        function turnoMasCercano(timestampMs) {
+            const fecha = new Date(timestampMs);
+            const horaDecimal = fecha.getHours() + fecha.getMinutes() / 60;
+            let mejorTurno = null, menorDistancia = Infinity;
+            Object.entries(HORA_OFICIAL_TURNO).forEach(([turnoId, horaOficial]) => {
+                let dist = Math.abs(horaDecimal - horaOficial);
+                dist = Math.min(dist, 24 - dist); // distancia circular (ej. 23:50 vs 00:10 son 20 min, no 23h40)
+                if (dist < menorDistancia) { menorDistancia = dist; mejorTurno = parseInt(turnoId, 10); }
+            });
+            return mejorTurno;
         }
 
         function detectarTurnoActual() {
@@ -413,6 +435,7 @@
         }
 
         const NOMBRE_TURNO = { 1: 'Turno 1 · 07:00–15:00', 2: 'Turno 2 · 15:00–23:00', 3: 'Turno 3 · 23:00–07:00' };
+        let turnoSeleccionadoActual = 1;
 
         // ---------- CARGA PRINCIPAL: SOLO EL TURNO SELECCIONADO, EN TIEMPO REAL ----------
         window.cargarBaseDeDatos = () => {
@@ -425,6 +448,7 @@
             const fFecha = document.getElementById('filtroFecha').value; // YYYY-MM-DD
             const fSector = document.getElementById('filtroSector').value;
             const turnoId = parseInt(document.getElementById('filtroTurno').value, 10);
+            turnoSeleccionadoActual = turnoId;
 
             const [y, m, d] = fFecha.split('-').map(Number);
             const fechaBase = new Date(y, m - 1, d);
@@ -476,6 +500,11 @@
 
             datosDelDia.forEach(d => {
                 if (d.tipo === "ENTRADA" || d.tipo === "SALIDA") {
+                    // Clasificar por cercanía al horario oficial, no por el rango ensanchado de la consulta.
+                    // Así una entrada temprana (ej. 6:10am) se reconoce como parte de ESTE turno
+                    // y no se confunde con la cola del turno anterior.
+                    if (turnoMasCercano(d.timestamp) !== turnoSeleccionadoActual) return;
+
                     const color = d.tipo === "ENTRADA" ? "bg-entrada" : "bg-salida";
                     tablaAsist.innerHTML += `<tr>
                         <td><b>${d.oficial}</b></td>
