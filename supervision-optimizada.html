@@ -166,6 +166,11 @@
             z-index: 1000; align-items: center; justify-content: center; padding: 20px;
         }
         #modal-historial.visible { display: flex; }
+        #modal-auditoria {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+            z-index: 1000; align-items: center; justify-content: center; padding: 20px;
+        }
+        #modal-auditoria.visible { display: flex; }
         .caja-historial { background: white; border-radius: 12px; width: 100%; max-width: 950px; max-height: 85vh; overflow-y: auto; padding: 20px; }
         .caja-historial-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .caja-historial-header button { background: #ecf0f1; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; }
@@ -189,8 +194,14 @@
                 <option value="Obras Fotur">Obras Fotur</option>
             </select>
             <input type="date" id="filtroFecha" onchange="cargarBaseDeDatos()">
+            <select id="filtroTurno" onchange="cargarBaseDeDatos()">
+                <option value="1">Turno 1 · 07:00–15:00</option>
+                <option value="2">Turno 2 · 15:00–23:00</option>
+                <option value="3">Turno 3 · 23:00–07:00</option>
+            </select>
         </div>
         <button onclick="cargarBaseDeDatos()" class="btn-buscar">🔄 Recargar ahora</button>
+        <button onclick="abrirAuditoriaCompleta()" class="btn-buscar" style="background:#8e44ad;">🗂️ Auditoría Completa</button>
         <span id="indicadorEnVivo" style="font-size:12px; color:#bdc3c7; align-self:center;">Conectando...</span>
     </header>
 
@@ -203,12 +214,12 @@
         </div>
 
         <div class="panel-datos">
-            <h3 style="margin-top:0; color:#2980b9;">🟢 Personal en turno ahora (día seleccionado)</h3>
+            <h3 style="margin-top:0; color:#2980b9;">🟢 Personal en turno <span id="tituloTurno">ahora</span></h3>
             <div id="turnoActual" class="turno-grid"></div>
         </div>
 
         <details class="panel-datos">
-            <summary>⏱️ Ver todos los registros de Asistencia del día</summary>
+            <summary>⏱️ Ver todos los registros de Asistencia del turno</summary>
             <table>
                 <thead><tr><th>Agente</th><th>Sector</th><th>Tipo</th><th>Fecha y Hora</th><th>Ubicación</th></tr></thead>
                 <tbody id="tablaAsistencia"></tbody>
@@ -216,13 +227,29 @@
         </details>
 
         <details class="panel-datos">
-            <summary>🚶‍♂️ Ver todos los Recorridos (Rondines) del día</summary>
+            <summary>🚶‍♂️ Ver todos los Recorridos (Rondines) del turno</summary>
             <table>
                 <thead><tr><th>Agente</th><th>Sector</th><th>Inicio</th><th>Fin</th><th>Puntos/Novedades</th><th>Acción</th></tr></thead>
                 <tbody id="tablaRecorridos"></tbody>
             </table>
         </details>
 
+    </div>
+
+    <!-- Modal de Auditoría Completa (rango de fechas libre, sin restricción de turno) -->
+    <div id="modal-auditoria">
+        <div class="caja-historial">
+            <div class="caja-historial-header">
+                <h3 style="margin:0;">🗂️ Auditoría Completa (rango libre)</h3>
+                <button onclick="cerrarAuditoriaCompleta()">✕ Cerrar</button>
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+                <div><label style="font-size:12px; color:#7f8c8d;">Desde</label><br><input type="date" id="auditoriaDesde"></div>
+                <div><label style="font-size:12px; color:#7f8c8d;">Hasta</label><br><input type="date" id="auditoriaHasta"></div>
+                <div><label style="font-size:12px; color:#7f8c8d;">&nbsp;</label><br><button class="btn-buscar" onclick="ejecutarAuditoriaCompleta()">Buscar</button></div>
+            </div>
+            <div id="contenidoAuditoria">Selecciona un rango de fechas y presiona "Buscar".</div>
+        </div>
     </div>
 
     <!-- Modal de mapa: no se monta Leaflet hasta que se abre por primera vez -->
@@ -292,9 +319,102 @@
             document.getElementById('modal-historial').classList.remove('visible');
         };
 
-        let unsubscribeActual = null; // permite cancelar el "escuchar en vivo" anterior al cambiar de día/sector
+        // ---------- AUDITORÍA COMPLETA: rango de fechas libre, sin restricción de turno ----------
+        window.abrirAuditoriaCompleta = function() {
+            document.getElementById('modal-auditoria').classList.add('visible');
+            if (!document.getElementById('auditoriaDesde').value) {
+                const hoy = new Date();
+                document.getElementById('auditoriaHasta').valueAsDate = hoy;
+                document.getElementById('auditoriaDesde').valueAsDate = hoy;
+            }
+        };
 
-        // ---------- CARGA PRINCIPAL: SOLO EL DÍA SELECCIONADO, EN TIEMPO REAL ----------
+        window.cerrarAuditoriaCompleta = function() {
+            document.getElementById('modal-auditoria').classList.remove('visible');
+        };
+
+        window.ejecutarAuditoriaCompleta = async function() {
+            const desde = document.getElementById('auditoriaDesde').value;
+            const hasta = document.getElementById('auditoriaHasta').value;
+            const cont = document.getElementById('contenidoAuditoria');
+            if (!desde || !hasta) { alert("Selecciona ambas fechas."); return; }
+
+            cont.innerHTML = "Buscando...";
+            try {
+                const [y1, m1, d1] = desde.split('-').map(Number);
+                const [y2, m2, d2] = hasta.split('-').map(Number);
+                const inicio = new Date(y1, m1 - 1, d1, 0, 0, 0, 0).getTime();
+                const fin = new Date(y2, m2 - 1, d2, 23, 59, 59, 999).getTime();
+
+                const q = query(
+                    collection(db, "recorridos"),
+                    where("timestamp", ">=", inicio),
+                    where("timestamp", "<=", fin),
+                    orderBy("timestamp", "desc")
+                );
+                const snapshot = await getDocs(q);
+                let filasAsist = [];
+                let gruposRec = {};
+
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    if (d.tipo === "ENTRADA" || d.tipo === "SALIDA") {
+                        const color = d.tipo === "ENTRADA" ? "bg-entrada" : "bg-salida";
+                        filasAsist.push(`<tr><td><b>${d.oficial}</b></td><td>${d.sector}</td><td><span class="badge ${color}">${d.tipo}</span></td><td>${d.fecha_hora}</td></tr>`);
+                    }
+                    if (d.tipo === "INICIO_RECORRIDO" || d.tipo === "FIN_RECORRIDO") {
+                        if (!gruposRec[d.id_recorrido]) gruposRec[d.id_recorrido] = { oficial: d.oficial, sector: d.sector, inicio: '', fin: '' };
+                        if (d.tipo === "INICIO_RECORRIDO") gruposRec[d.id_recorrido].inicio = d.fecha_hora;
+                        if (d.tipo === "FIN_RECORRIDO") gruposRec[d.id_recorrido].fin = d.fecha_hora;
+                    }
+                });
+
+                const filasRec = Object.values(gruposRec).map(r => `<tr><td><b>${r.oficial}</b></td><td>${r.sector}</td><td>${r.inicio}</td><td>${r.fin}</td></tr>`);
+
+                cont.innerHTML = `
+                    <p style="color:#7f8c8d; font-size:13px;">${filasAsist.length} registros de asistencia · ${filasRec.length} recorridos en el rango ${desde} a ${hasta}</p>
+                    <h4 style="color:#2980b9;">Asistencia</h4>
+                    <table><thead><tr><th>Agente</th><th>Sector</th><th>Tipo</th><th>Fecha y hora</th></tr></thead><tbody>${filasAsist.join('') || '<tr><td colspan=4>Sin registros</td></tr>'}</tbody></table>
+                    <h4 style="color:#2980b9; margin-top:20px;">Recorridos</h4>
+                    <table><thead><tr><th>Agente</th><th>Sector</th><th>Inicio</th><th>Fin</th></tr></thead><tbody>${filasRec.join('') || '<tr><td colspan=4>Sin registros</td></tr>'}</tbody></table>
+                `;
+            } catch (e) {
+                cont.innerHTML = `❌ Error: ${e.message}`;
+                console.error(e);
+            }
+        };
+
+        let unsubscribeActual = null; // permite cancelar el "escuchar en vivo" anterior al cambiar de turno/sector
+
+        // ---------- CÁLCULO DE TURNOS (con cruce de medianoche para el nocturno) ----------
+        function calcularRangoTurno(fechaBase, turnoId) {
+            const y = fechaBase.getFullYear(), m = fechaBase.getMonth(), d = fechaBase.getDate();
+            if (turnoId === 1) {
+                return { inicio: new Date(y, m, d, 7, 0, 0, 0).getTime(), fin: new Date(y, m, d, 14, 59, 59, 999).getTime() };
+            } else if (turnoId === 2) {
+                return { inicio: new Date(y, m, d, 15, 0, 0, 0).getTime(), fin: new Date(y, m, d, 22, 59, 59, 999).getTime() };
+            } else {
+                // Turno 3 (nocturno): inicia 23:00 del día base, termina 07:00 del día siguiente
+                const inicio = new Date(y, m, d, 23, 0, 0, 0).getTime();
+                const fin = new Date(y, m, d + 1, 6, 59, 59, 999).getTime();
+                return { inicio, fin };
+            }
+        }
+
+        function detectarTurnoActual() {
+            const ahora = new Date();
+            const h = ahora.getHours();
+            if (h >= 7 && h < 15) return { turnoId: 1, fechaBase: ahora };
+            if (h >= 15 && h < 23) return { turnoId: 2, fechaBase: ahora };
+            if (h >= 23) return { turnoId: 3, fechaBase: ahora };
+            // h < 7 -> el turno nocturno empezó AYER a las 23:00
+            const ayer = new Date(ahora); ayer.setDate(ayer.getDate() - 1);
+            return { turnoId: 3, fechaBase: ayer };
+        }
+
+        const NOMBRE_TURNO = { 1: 'Turno 1 · 07:00–15:00', 2: 'Turno 2 · 15:00–23:00', 3: 'Turno 3 · 23:00–07:00' };
+
+        // ---------- CARGA PRINCIPAL: SOLO EL TURNO SELECCIONADO, EN TIEMPO REAL ----------
         window.cargarBaseDeDatos = () => {
             const btn = document.querySelector('.btn-buscar');
             const indicador = document.getElementById('indicadorEnVivo');
@@ -304,21 +424,22 @@
             }
             const fFecha = document.getElementById('filtroFecha').value; // YYYY-MM-DD
             const fSector = document.getElementById('filtroSector').value;
+            const turnoId = parseInt(document.getElementById('filtroTurno').value, 10);
 
             const [y, m, d] = fFecha.split('-').map(Number);
-            const inicioDia = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-            const finDia = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+            const fechaBase = new Date(y, m - 1, d);
+            const { inicio: inicioTurno, fin: finTurno } = calcularRangoTurno(fechaBase, turnoId);
 
-            // Cancelar el listener anterior antes de crear uno nuevo (evita duplicados y fugas de memoria)
+            document.getElementById('tituloTurno').innerText = `— ${NOMBRE_TURNO[turnoId]} (${fFecha})`;
+
             if (unsubscribeActual) { unsubscribeActual(); unsubscribeActual = null; }
-
             btn.innerText = "Conectando..."; btn.disabled = true;
 
             try {
                 const q = query(
                     collection(db, "recorridos"),
-                    where("timestamp", ">=", inicioDia),
-                    where("timestamp", "<=", finDia),
+                    where("timestamp", ">=", inicioTurno),
+                    where("timestamp", "<=", finTurno),
                     orderBy("timestamp", "asc")
                 );
 
@@ -408,17 +529,17 @@
             const enTurno = Object.values(ultimoEventoPorAgente).filter(d => d.tipo === "ENTRADA");
 
             if (enTurno.length === 0) {
-                cont.innerHTML = '<div class="sin-turno">Nadie marcado como "en turno" en el día seleccionado.</div>';
+                cont.innerHTML = '<div class="sin-turno">Nadie marcado como "en turno" en este turno/fecha seleccionado.</div>';
                 return;
             }
 
             cont.innerHTML = enTurno.map(d => {
-                // Buscar el recorrido más reciente de este agente en el día
+                // Buscar el recorrido más reciente de este agente (dentro del turno ya cargado)
                 const recorridosDelAgente = Object.values(recorridosAgrupados).filter(r => r.oficial === d.oficial);
                 const ultimoRecorrido = recorridosDelAgente.sort((a, b) => (b.inicioTs || 0) - (a.inicioTs || 0))[0];
                 const infoRecorrido = ultimoRecorrido
                     ? `Último recorrido: ${ultimoRecorrido.inicio} → ${ultimoRecorrido.fin}`
-                    : 'Sin recorridos registrados hoy';
+                    : 'Sin recorridos registrados en este turno';
 
                 return `<div class="card-agente">
                     <h4>👮 ${d.oficial}</h4>
@@ -427,11 +548,37 @@
                     <p>${infoRecorrido}</p>
                     <div class="acciones">
                         ${ultimoRecorrido ? `<button onclick="dibujarRuta('${Object.keys(recorridosAgrupados).find(k => recorridosAgrupados[k] === ultimoRecorrido)}')">🗺️ Ver último recorrido</button>` : ''}
-                        <button onclick="verHistorialCompleto('${d.oficial}')">📋 Historial completo</button>
+                        ${recorridosDelAgente.length > 1 ? `<button onclick="verRecorridosDelTurno('${d.oficial}')">📜 Todos (${recorridosDelAgente.length})</button>` : ''}
                     </div>
                 </div>`;
             }).join('');
         }
+
+        // Ver todos los recorridos de un agente DENTRO del turno ya cargado (instantáneo, sin nueva consulta)
+        window.verRecorridosDelTurno = function(nombreOficial) {
+            document.getElementById('tituloHistorial').innerText = `Recorridos del turno — ${nombreOficial}`;
+            document.getElementById('modal-historial').classList.add('visible');
+
+            const recorridosDelAgente = Object.values(recorridosAgrupados)
+                .filter(r => r.oficial === nombreOficial)
+                .sort((a, b) => (b.inicioTs || 0) - (a.inicioTs || 0));
+
+            const filas = recorridosDelAgente.map(r => {
+                const idKey = Object.keys(recorridosAgrupados).find(k => recorridosAgrupados[k] === r);
+                const novedades = r.puntos.filter(p => p.tipo === "PUNTO").length;
+                return `<tr>
+                    <td>${r.sector}</td>
+                    <td>${r.inicio}</td>
+                    <td>${r.fin}</td>
+                    <td>${novedades} novedad(es)</td>
+                    <td><button class="btn-ver-ruta" onclick="dibujarRuta('${idKey}')">🗺️ Ver ruta</button></td>
+                </tr>`;
+            });
+
+            document.getElementById('contenidoHistorial').innerHTML = filas.length
+                ? `<table><thead><tr><th>Sector</th><th>Inicio</th><th>Fin</th><th>Novedades</th><th>Acción</th></tr></thead><tbody>${filas.join('')}</tbody></table>`
+                : '<p>Sin recorridos en este turno.</p>';
+        };
 
         // ---------- BUSCADOR: ÚLTIMO REGISTRO DE UN AGENTE (dentro del día cargado) ----------
         window.buscarAgente = function() {
@@ -548,7 +695,12 @@
             }, 60);
         };
 
-        window.onload = cargarBaseDeDatos;
+        window.onload = () => {
+            const { turnoId, fechaBase } = detectarTurnoActual();
+            document.getElementById('filtroFecha').valueAsDate = fechaBase;
+            document.getElementById('filtroTurno').value = String(turnoId);
+            cargarBaseDeDatos();
+        };
     </script>
 </body>
 
