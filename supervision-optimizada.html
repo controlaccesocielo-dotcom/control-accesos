@@ -190,7 +190,8 @@
             </select>
             <input type="date" id="filtroFecha" onchange="cargarBaseDeDatos()">
         </div>
-        <button onclick="cargarBaseDeDatos()" class="btn-buscar">🔄 Refrescar día</button>
+        <button onclick="cargarBaseDeDatos()" class="btn-buscar">🔄 Recargar ahora</button>
+        <span id="indicadorEnVivo" style="font-size:12px; color:#bdc3c7; align-self:center;">Conectando...</span>
     </header>
 
     <div class="contenedor-principal">
@@ -249,15 +250,15 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, query, orderBy, where, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, query, orderBy, where, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
-            apiKey: "AIzaSyCK-45yZZbV5TTVKTBTcJt4iCwKEnWCN0o",
-            authDomain: "control-accesos-elcielo-66971.firebaseapp.com",
-            projectId: "control-accesos-elcielo-66971",
-            storageBucket: "control-accesos-elcielo-66971.firebasestorage.app",
-            messagingSenderId: "328671175721",
-            appId: "1:328671175721:web:fa390ec65ec6f3b2d5e838"
+            apiKey: "AIzaSyBU3oWLwBkIc_5riruLGc3dFS5wHo2RV0s",
+            authDomain: "sistema-vigilancia-6851e.firebaseapp.com",
+            projectId: "sistema-vigilancia-6851e",
+            storageBucket: "sistema-vigilancia-6851e.firebasestorage.app",
+            messagingSenderId: "714792023462",
+            appId: "1:714792023462:web:4f560ecf2a16e6a041cb67"
         };
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
@@ -291,10 +292,12 @@
             document.getElementById('modal-historial').classList.remove('visible');
         };
 
-        // ---------- CARGA PRINCIPAL: SOLO EL DÍA SELECCIONADO ----------
-        window.cargarBaseDeDatos = async () => {
+        let unsubscribeActual = null; // permite cancelar el "escuchar en vivo" anterior al cambiar de día/sector
+
+        // ---------- CARGA PRINCIPAL: SOLO EL DÍA SELECCIONADO, EN TIEMPO REAL ----------
+        window.cargarBaseDeDatos = () => {
             const btn = document.querySelector('.btn-buscar');
-            btn.innerText = "Cargando..."; btn.disabled = true;
+            const indicador = document.getElementById('indicadorEnVivo');
 
             if (!document.getElementById('filtroFecha').value) {
                 document.getElementById('filtroFecha').valueAsDate = new Date();
@@ -306,6 +309,11 @@
             const inicioDia = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
             const finDia = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
 
+            // Cancelar el listener anterior antes de crear uno nuevo (evita duplicados y fugas de memoria)
+            if (unsubscribeActual) { unsubscribeActual(); unsubscribeActual = null; }
+
+            btn.innerText = "Conectando..."; btn.disabled = true;
+
             try {
                 const q = query(
                     collection(db, "recorridos"),
@@ -313,20 +321,28 @@
                     where("timestamp", "<=", finDia),
                     orderBy("timestamp", "asc")
                 );
-                const snapshot = await getDocs(q);
-                datosDelDia = [];
-                snapshot.forEach(doc => datosDelDia.push(doc.data()));
 
-                if (fSector !== "TODOS") {
-                    datosDelDia = datosDelDia.filter(d => d.sector === fSector);
-                }
+                unsubscribeActual = onSnapshot(q, (snapshot) => {
+                    datosDelDia = [];
+                    snapshot.forEach(doc => datosDelDia.push(doc.data()));
 
-                procesarDatosDelDia();
+                    if (fSector !== "TODOS") {
+                        datosDelDia = datosDelDia.filter(d => d.sector === fSector);
+                    }
+
+                    procesarDatosDelDia();
+                    btn.innerText = "🔄 Recargar ahora"; btn.disabled = false;
+                    if (indicador) { indicador.innerText = "🟢 En vivo — se actualiza solo"; }
+                }, (e) => {
+                    console.error(e);
+                    alert("❌ Error al conectar con la base de datos:\n" + e.message);
+                    btn.innerText = "🔄 Recargar ahora"; btn.disabled = false;
+                });
             } catch (e) {
                 console.error(e);
                 alert("❌ Error al conectar con la base de datos:\n" + e.message);
+                btn.innerText = "🔄 Recargar ahora"; btn.disabled = false;
             }
-            btn.innerText = "🔄 Refrescar día"; btn.disabled = false;
         };
 
         function procesarDatosDelDia() {
