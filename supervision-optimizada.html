@@ -497,6 +497,19 @@
             const tablaRec = document.getElementById('tablaRecorridos');
             tablaAsist.innerHTML = ""; tablaRec.innerHTML = "";
 
+            // --- DIAGNÓSTICO TEMPORAL: conteo de tipos recibidos de Firestore ---
+            const conteoTipos = {};
+            datosDelDia.forEach(d => { conteoTipos[d.tipo] = (conteoTipos[d.tipo] || 0) + 1; });
+            console.log("DIAGNÓSTICO — documentos recibidos por tipo:", conteoTipos, "Total:", datosDelDia.length);
+            let diagEl = document.getElementById('diagnostico-temporal');
+            if (!diagEl) {
+                diagEl = document.createElement('div');
+                diagEl.id = 'diagnostico-temporal';
+                diagEl.style.cssText = 'background:#fff3cd; border:2px solid #ffc107; border-radius:8px; padding:10px 14px; margin-bottom:15px; font-size:12.5px; font-family:monospace;';
+                document.querySelector('.contenedor-principal').prepend(diagEl);
+            }
+            diagEl.innerHTML = `🔧 DIAGNÓSTICO — Total documentos cargados: <b>${datosDelDia.length}</b> · Por tipo: ${JSON.stringify(conteoTipos)}`;
+
             const ultimoEventoPorAgente = {}; // oficial -> último registro ENTRADA/SALIDA
 
             datosDelDia.forEach(d => {
@@ -592,7 +605,7 @@
 
         // Ver todos los recorridos de un agente DENTRO del turno ya cargado (instantáneo, sin nueva consulta)
         window.verRecorridosDelTurno = function(nombreOficial) {
-            document.getElementById('tituloHistorial').innerText = `Recorridos del turno — ${nombreOficial}`;
+            document.getElementById('tituloHistorial').innerText = `Reporte completo de recorridos — ${nombreOficial}`;
             document.getElementById('modal-historial').classList.add('visible');
 
             const recorridosDelAgente = Object.values(recorridosAgrupados)
@@ -601,18 +614,29 @@
 
             const filas = recorridosDelAgente.map(r => {
                 const idKey = Object.keys(recorridosAgrupados).find(k => recorridosAgrupados[k] === r);
-                const novedades = r.puntos.filter(p => p.tipo === "PUNTO").length;
+                const enCurso = r.fin === 'En proceso...';
+                const estadoHtml = enCurso
+                    ? '<span style="color:#e67e22; font-weight:bold;">🟡 En proceso</span>'
+                    : '<span style="color:#27ae60; font-weight:bold;">✅ Finalizado</span>';
+
+                let novedadesHtml = r.puntos.filter(p => p.tipo === "PUNTO").map(p => {
+                    let text = `• [${p.hora}] ${p.nov || ''}`;
+                    if (p.foto && p.foto !== "NO") text += ` <br><img src="${p.foto}" class="img-mini" onclick="window.open(this.src)">`;
+                    return text;
+                }).join('<hr style="margin:5px 0; border-top:1px solid #ddd;">');
+                if (!novedadesHtml) novedadesHtml = "<i>Sin novedades marcadas</i>";
+
                 return `<tr>
                     <td>${r.sector}</td>
                     <td>${r.inicio}</td>
-                    <td>${r.fin}</td>
-                    <td>${novedades} novedad(es)</td>
+                    <td>${estadoHtml}${!enCurso ? `<br><small>${r.fin}</small>` : ''}</td>
+                    <td>${novedadesHtml}</td>
                     <td><button class="btn-ver-ruta" onclick="dibujarRuta('${idKey}')">🗺️ Ver ruta</button></td>
                 </tr>`;
             });
 
             document.getElementById('contenidoHistorial').innerHTML = filas.length
-                ? `<table><thead><tr><th>Sector</th><th>Inicio</th><th>Fin</th><th>Novedades</th><th>Acción</th></tr></thead><tbody>${filas.join('')}</tbody></table>`
+                ? `<table><thead><tr><th>Sector</th><th>Hora Inicio</th><th>Estado</th><th>Novedades</th><th>Acción</th></tr></thead><tbody>${filas.join('')}</tbody></table>`
                 : '<p>Sin recorridos en este turno.</p>';
         };
 
