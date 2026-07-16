@@ -510,6 +510,22 @@
             }
             diagEl.innerHTML = `🔧 DIAGNÓSTICO — Total documentos cargados: <b>${datosDelDia.length}</b> · Por tipo: ${JSON.stringify(conteoTipos)}`;
 
+            // --- DIAGNÓSTICO 2: comparar nombres de "oficial" entre entradas y recorridos ---
+            const nombresEntrada = new Set();
+            const nombresRecorrido = new Set();
+            datosDelDia.forEach(d => {
+                if (d.tipo === "ENTRADA" || d.tipo === "SALIDA") nombresEntrada.add(JSON.stringify(d.oficial));
+                if (d.tipo === "INICIO_RECORRIDO" || d.tipo === "PUNTO" || d.tipo === "FIN_RECORRIDO") nombresRecorrido.add(JSON.stringify(d.oficial));
+            });
+            let diagNombres = document.getElementById('diagnostico-nombres');
+            if (!diagNombres) {
+                diagNombres = document.createElement('div');
+                diagNombres.id = 'diagnostico-nombres';
+                diagNombres.style.cssText = 'background:#e8f4fd; border:2px solid #3498db; border-radius:8px; padding:10px 14px; margin-bottom:15px; font-size:12px; font-family:monospace;';
+                diagEl.after(diagNombres);
+            }
+            diagNombres.innerHTML = `🔧 Nombres en ENTRADA/SALIDA: ${[...nombresEntrada].join(' | ')}<br>🔧 Nombres en RECORRIDOS: ${[...nombresRecorrido].join(' | ')}`;
+
             const ultimoEventoPorAgente = {}; // oficial -> último registro ENTRADA/SALIDA
 
             datosDelDia.forEach(d => {
