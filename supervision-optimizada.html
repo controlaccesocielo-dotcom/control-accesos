@@ -438,6 +438,22 @@
         const NOMBRE_TURNO = { 1: 'Turno 1 · 07:00–15:00', 2: 'Turno 2 · 15:00–23:00', 3: 'Turno 3 · 23:00–07:00' };
         let turnoSeleccionadoActual = 1;
 
+        // Compara nombres de agentes sin importar mayúsculas/minúsculas ni espacios de más
+        // (ej. "MARIO IBARRA" y "Mario ibarra" deben tratarse como la misma persona).
+        // Si no coincide el nombre completo, prueba solo por el primer nombre, para cubrir
+        // casos como "Jorge Macias" (entrada) vs "Jorge" (recorrido) donde falta el apellido.
+        function normalizarNombre(nombre) {
+            return (nombre || '').trim().toUpperCase().replace(/\s+/g, ' ');
+        }
+        function nombresCoinciden(nombreA, nombreB) {
+            const a = normalizarNombre(nombreA), b = normalizarNombre(nombreB);
+            if (!a || !b) return false;
+            if (a === b) return true;
+            const primerNombreA = a.split(' ')[0];
+            const primerNombreB = b.split(' ')[0];
+            return primerNombreA === primerNombreB;
+        }
+
         // ---------- CARGA PRINCIPAL: SOLO EL TURNO SELECCIONADO, EN TIEMPO REAL ----------
         window.cargarBaseDeDatos = () => {
             const btn = document.querySelector('.btn-buscar');
@@ -547,7 +563,7 @@
                         <td>${d.fecha_hora}</td>
                         <td><button onclick='abrirMapaPunto(${d.latitud}, ${d.longitud}, "${d.oficial} - ${d.tipo}")'>Ver Mapa</button></td>
                     </tr>`;
-                    ultimoEventoPorAgente[d.oficial] = d; // como viene ordenado asc, el último sobreescribe
+                    ultimoEventoPorAgente[normalizarNombre(d.oficial)] = d; // clave normalizada: evita duplicar al mismo agente por mayúsculas distintas
                 }
 
                 if (d.tipo === "INICIO_RECORRIDO" || d.tipo === "PUNTO" || d.tipo === "FIN_RECORRIDO") {
@@ -598,7 +614,7 @@
 
             cont.innerHTML = enTurno.map(d => {
                 // Buscar el recorrido más reciente de este agente (dentro del turno ya cargado)
-                const recorridosDelAgente = Object.values(recorridosAgrupados).filter(r => r.oficial === d.oficial);
+                const recorridosDelAgente = Object.values(recorridosAgrupados).filter(r => nombresCoinciden(r.oficial, d.oficial));
                 const ultimoRecorrido = recorridosDelAgente.sort((a, b) => (b.inicioTs || 0) - (a.inicioTs || 0))[0];
                 const enCurso = ultimoRecorrido && ultimoRecorrido.fin === 'En proceso...';
                 const infoRecorrido = ultimoRecorrido
@@ -625,7 +641,7 @@
             document.getElementById('modal-historial').classList.add('visible');
 
             const recorridosDelAgente = Object.values(recorridosAgrupados)
-                .filter(r => r.oficial === nombreOficial)
+                .filter(r => nombresCoinciden(r.oficial, nombreOficial))
                 .sort((a, b) => (b.inicioTs || 0) - (a.inicioTs || 0));
 
             const filas = recorridosDelAgente.map(r => {
