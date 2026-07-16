@@ -387,35 +387,36 @@
         let unsubscribeActual = null; // permite cancelar el "escuchar en vivo" anterior al cambiar de turno/sector
 
         // ---------- CÁLCULO DE TURNOS (con cruce de medianoche para el nocturno) ----------
-        // NOTA: el inicio de la consulta se ensancha 1 hora hacia atrás para capturar
-        // check-ins tempranos (reglamento: hasta 1h antes, 15 min de tolerancia después).
+        // NOTA: la ventana de consulta se ensancha 1 hora antes del inicio y 30 min después
+        // del fin oficial, para capturar entradas tempranas y salidas ligeramente tardías.
         // La clasificación real de a qué turno pertenece cada ENTRADA/SALIDA se hace
-        // aparte, por cercanía al horario oficial (ver turnoMasCercano), no por este rango.
+        // aparte, por cercanía al horario oficial (ver turnoPorCercania), no por este rango.
         function calcularRangoTurno(fechaBase, turnoId) {
             const y = fechaBase.getFullYear(), m = fechaBase.getMonth(), d = fechaBase.getDate();
             if (turnoId === 1) {
-                return { inicio: new Date(y, m, d, 6, 0, 0, 0).getTime(), fin: new Date(y, m, d, 14, 59, 59, 999).getTime() };
+                return { inicio: new Date(y, m, d, 6, 0, 0, 0).getTime(), fin: new Date(y, m, d, 15, 29, 59, 999).getTime() };
             } else if (turnoId === 2) {
-                return { inicio: new Date(y, m, d, 14, 0, 0, 0).getTime(), fin: new Date(y, m, d, 22, 59, 59, 999).getTime() };
+                return { inicio: new Date(y, m, d, 14, 0, 0, 0).getTime(), fin: new Date(y, m, d, 23, 29, 59, 999).getTime() };
             } else {
-                // Turno 3 (nocturno): margen desde 22:00 del día base, termina 07:00 del día siguiente
+                // Turno 3 (nocturno): margen desde 22:00 del día base, termina 07:30 del día siguiente
                 const inicio = new Date(y, m, d, 22, 0, 0, 0).getTime();
-                const fin = new Date(y, m, d + 1, 6, 59, 59, 999).getTime();
+                const fin = new Date(y, m, d + 1, 7, 29, 59, 999).getTime();
                 return { inicio, fin };
             }
         }
 
-        const HORA_OFICIAL_TURNO = { 1: 7, 2: 15, 3: 23 };
+        const HORA_INICIO_TURNO = { 1: 7, 2: 15, 3: 23 };
+        const HORA_FIN_TURNO = { 1: 15, 2: 23, 3: 7 }; // el fin de un turno = inicio del siguiente en el reloj, por eso van separados
 
         // Determina a qué turno pertenece REALMENTE un registro, por cercanía al horario
-        // oficial (07:00 / 15:00 / 23:00) en un reloj circular de 24h — así una entrada a
-        // las 6:10am se reconoce como Turno 1 (50 min antes) y no como cola del Turno 3
-        // (que estaría a más de 7 horas de distancia).
-        function turnoMasCercano(timestampMs) {
+        // oficial correspondiente, en un reloj circular de 24h — así una entrada a las
+        // 6:10am se reconoce como Turno 1 (inicio 07:00, 50 min de distancia) y una salida
+        // a las 15:10 se reconoce como Turno 1 (fin 15:00), no como inicio del Turno 2.
+        function turnoPorCercania(timestampMs, mapaHorasOficiales) {
             const fecha = new Date(timestampMs);
             const horaDecimal = fecha.getHours() + fecha.getMinutes() / 60;
             let mejorTurno = null, menorDistancia = Infinity;
-            Object.entries(HORA_OFICIAL_TURNO).forEach(([turnoId, horaOficial]) => {
+            Object.entries(mapaHorasOficiales).forEach(([turnoId, horaOficial]) => {
                 let dist = Math.abs(horaDecimal - horaOficial);
                 dist = Math.min(dist, 24 - dist); // distancia circular (ej. 23:50 vs 00:10 son 20 min, no 23h40)
                 if (dist < menorDistancia) { menorDistancia = dist; mejorTurno = parseInt(turnoId, 10); }
@@ -503,7 +504,11 @@
                     // Clasificar por cercanía al horario oficial, no por el rango ensanchado de la consulta.
                     // Así una entrada temprana (ej. 6:10am) se reconoce como parte de ESTE turno
                     // y no se confunde con la cola del turno anterior.
-                    if (turnoMasCercano(d.timestamp) !== turnoSeleccionadoActual) return;
+                    // Entrada -> se compara contra la hora de INICIO de cada turno.
+                    // Salida -> se compara contra la hora de FIN de cada turno (no es lo mismo,
+                    // aunque casualmente son los mismos 3 números de reloj).
+                    const mapaHoras = d.tipo === "ENTRADA" ? HORA_INICIO_TURNO : HORA_FIN_TURNO;
+                    if (turnoPorCercania(d.timestamp, mapaHoras) !== turnoSeleccionadoActual) return;
 
                     const color = d.tipo === "ENTRADA" ? "bg-entrada" : "bg-salida";
                     tablaAsist.innerHTML += `<tr>
@@ -566,18 +571,20 @@
                 // Buscar el recorrido más reciente de este agente (dentro del turno ya cargado)
                 const recorridosDelAgente = Object.values(recorridosAgrupados).filter(r => r.oficial === d.oficial);
                 const ultimoRecorrido = recorridosDelAgente.sort((a, b) => (b.inicioTs || 0) - (a.inicioTs || 0))[0];
+                const enCurso = ultimoRecorrido && ultimoRecorrido.fin === 'En proceso...';
                 const infoRecorrido = ultimoRecorrido
-                    ? `Último recorrido: ${ultimoRecorrido.inicio} → ${ultimoRecorrido.fin}`
+                    ? `Último recorrido: ${ultimoRecorrido.inicio} → ${ultimoRecorrido.fin} ${enCurso ? '<span style="color:#e67e22; font-weight:bold;">🟡 En curso</span>' : '<span style="color:#27ae60; font-weight:bold;">✅ Finalizado</span>'}`
                     : 'Sin recorridos registrados en este turno';
 
-                return `<div class="card-agente">
+                return `<div class="card-agente" style="${enCurso ? 'border-left-color:#e67e22;' : ''}">
                     <h4>👮 ${d.oficial}</h4>
                     <p>📍 ${d.sector}</p>
                     <p>🕐 Entrada: ${d.fecha_hora}</p>
                     <p>${infoRecorrido}</p>
+                    <p>🔁 <b>Recorridos realizados: ${recorridosDelAgente.length}</b></p>
                     <div class="acciones">
-                        ${ultimoRecorrido ? `<button onclick="dibujarRuta('${Object.keys(recorridosAgrupados).find(k => recorridosAgrupados[k] === ultimoRecorrido)}')">🗺️ Ver último recorrido</button>` : ''}
-                        ${recorridosDelAgente.length > 1 ? `<button onclick="verRecorridosDelTurno('${d.oficial}')">📜 Todos (${recorridosDelAgente.length})</button>` : ''}
+                        ${ultimoRecorrido ? `<button onclick="dibujarRuta('${Object.keys(recorridosAgrupados).find(k => recorridosAgrupados[k] === ultimoRecorrido)}')">🗺️ Ver mapa</button>` : ''}
+                        ${recorridosDelAgente.length > 1 ? `<button onclick="verRecorridosDelTurno('${d.oficial}')">📜 Ver todos</button>` : ''}
                     </div>
                 </div>`;
             }).join('');
