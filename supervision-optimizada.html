@@ -657,8 +657,16 @@
             // Un recorrido pertenece al turno en el que INICIÓ, no al turno "matemático" del reloj.
             // Esto evita que un patrullaje que arrancó en el turno anterior (dentro del margen de
             // 1 hora que ensanchamos la consulta) se cuele en el turno actual.
+            //
+            // Caso especial: si nunca llegó el documento real de INICIO_RECORRIDO (por eso "inicio"
+            // se quedó en "Desconocido"), significa que el recorrido arrancó ANTES de que empezara
+            // la ventana de esta consulta — es decir, es 100% del turno anterior, sin importar qué
+            // tan cerca caigan sus puntos intermedios. Se excluye siempre, sin excepción.
             Object.keys(recorridosAgrupados).forEach(id => {
-                if (turnoPorCercania(recorridosAgrupados[id].inicioTs, HORA_INICIO_TURNO) !== turnoSeleccionadoActual) {
+                const r = recorridosAgrupados[id];
+                const empezoAntesDeLaVentana = r.inicio === "Desconocido";
+                const noPerteneceAlTurno = turnoPorCercania(r.inicioTs, HORA_INICIO_TURNO) !== turnoSeleccionadoActual;
+                if (empezoAntesDeLaVentana || noPerteneceAlTurno) {
                     delete recorridosAgrupados[id];
                 }
             });
