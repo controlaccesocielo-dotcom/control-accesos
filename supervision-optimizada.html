@@ -277,8 +277,9 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, query, orderBy, where, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, query, orderBy, where, getDocs, onSnapshot, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
+        // Conexión #1: cuenta ORIGINAL — solo lectura, aquí viven los datos reales de asistencia/recorridos
         const firebaseConfig = {
             apiKey: "AIzaSyBU3oWLwBkIc_5riruLGc3dFS5wHo2RV0s",
             authDomain: "sistema-vigilancia-6851e.firebaseapp.com",
@@ -290,12 +291,27 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
+        // Conexión #2: cuenta NUEVA/dedicada — aquí SÍ se escribe, solo la asignación de puesto
+        // (Patrullero/Monitorista) por turno. Nunca toca la base original.
+        const firebaseConfigRoles = {
+            apiKey: "AIzaSyCK-45yZZbV5TTVKTBTcJt4iCwKEnWCN0o",
+            authDomain: "control-accesos-elcielo-66971.firebaseapp.com",
+            projectId: "control-accesos-elcielo-66971",
+            storageBucket: "control-accesos-elcielo-66971.firebasestorage.app",
+            messagingSenderId: "328671175721",
+            appId: "1:328671175721:web:fa390ec65ec6f3b2d5e838"
+        };
+        const appRoles = initializeApp(firebaseConfigRoles, "appRoles");
+        const dbRoles = getFirestore(appRoles);
+
         let map = null; // Leaflet se crea solo la primera vez que se abre el visor
         let capaMarcadores = null;
         let rutaRoja = null;
 
         let datosDelDia = [];
         let recorridosAgrupados = {};
+        let asignacionPuestos = {}; // nombreNormalizado -> 'monitorista' | 'patrullero' (para el turno actual)
+        let idDocAsignacion = ''; // se arma con fecha + turno, ej. "2026-07-15_3"
 
         function inicializarMapaSiHaceFalta() {
             if (map) return;
@@ -356,8 +372,8 @@
                 let filasAsist = [];
                 let gruposRec = {};
 
-                snapshot.forEach(doc => {
-                    const d = doc.data();
+                snapshot.forEach(docSnap => {
+                    const d = docSnap.data();
                     if (d.tipo === "ENTRADA" || d.tipo === "SALIDA") {
                         const color = d.tipo === "ENTRADA" ? "bg-entrada" : "bg-salida";
                         filasAsist.push(`<tr><td><b>${d.oficial}</b></td><td>${d.sector}</td><td><span class="badge ${color}">${d.tipo}</span></td><td>${d.fecha_hora}</td></tr>`);
@@ -385,6 +401,7 @@
         };
 
         let unsubscribeActual = null; // permite cancelar el "escuchar en vivo" anterior al cambiar de turno/sector
+        let unsubscribeRoles = null; // idem, para la asignación de puesto
 
         // ---------- CÁLCULO DE TURNOS (con cruce de medianoche para el nocturno) ----------
         // NOTA: la ventana de consulta se ensancha 1 hora antes del inicio y 30 min después
@@ -473,6 +490,13 @@
 
             document.getElementById('tituloTurno').innerText = `— ${NOMBRE_TURNO[turnoId]} (${fFecha})`;
 
+            idDocAsignacion = `${fFecha}_turno${turnoId}`;
+            if (unsubscribeRoles) { unsubscribeRoles(); unsubscribeRoles = null; }
+            unsubscribeRoles = onSnapshot(doc(dbRoles, "asignacion_turno", idDocAsignacion), (docSnap) => {
+                asignacionPuestos = docSnap.exists() ? docSnap.data() : {};
+                procesarDatosDelDia(); // re-renderiza las tarjetas con el puesto ya actualizado
+            }, (e) => console.error("Error leyendo asignación de puesto:", e));
+
             if (unsubscribeActual) { unsubscribeActual(); unsubscribeActual = null; }
             btn.innerText = "Conectando..."; btn.disabled = true;
 
@@ -486,7 +510,7 @@
 
                 unsubscribeActual = onSnapshot(q, (snapshot) => {
                     datosDelDia = [];
-                    snapshot.forEach(doc => datosDelDia.push(doc.data()));
+                    snapshot.forEach(docSnap => datosDelDia.push(docSnap.data()));
 
                     if (fSector !== "TODOS") {
                         datosDelDia = datosDelDia.filter(d => d.sector === fSector);
@@ -621,8 +645,26 @@
                     ? `Último recorrido: ${ultimoRecorrido.inicio} → ${ultimoRecorrido.fin} ${enCurso ? '<span style="color:#e67e22; font-weight:bold;">🟡 En curso</span>' : '<span style="color:#27ae60; font-weight:bold;">✅ Finalizado</span>'}`
                     : 'Sin recorridos registrados en este turno';
 
+                // Puesto: si ya hay una asignación manual guardada, se respeta; si no, se sugiere
+                // por la regla simple (sin recorridos en el turno -> probablemente monitorista).
+                const clave = normalizarNombre(d.oficial);
+                const puestoGuardado = asignacionPuestos[clave];
+                const puestoSugerido = recorridosDelAgente.length > 0 ? 'patrullero' : 'monitorista';
+                const puestoActual = puestoGuardado || puestoSugerido;
+                const esSugerido = !puestoGuardado;
+                const etiquetaPuesto = puestoActual === 'monitorista' ? '🖥️ Monitorista' : '🚓 Patrullero';
+
                 return `<div class="card-agente" style="${enCurso ? 'border-left-color:#e67e22;' : ''}">
-                    <h4>👮 ${d.oficial}</h4>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+                        <h4 style="margin-bottom:2px;">👮 ${d.oficial}</h4>
+                    </div>
+                    <p style="margin-top:0;">
+                        <select onchange="guardarPuesto('${clave}', this.value)" style="font-size:11.5px; padding:3px 6px; border-radius:6px;">
+                            <option value="patrullero" ${puestoActual === 'patrullero' ? 'selected' : ''}>🚓 Patrullero</option>
+                            <option value="monitorista" ${puestoActual === 'monitorista' ? 'selected' : ''}>🖥️ Monitorista</option>
+                        </select>
+                        ${esSugerido ? '<span style="font-size:11px; color:#95a5a6;"> (sugerido)</span>' : '<span style="font-size:11px; color:#27ae60;"> (confirmado)</span>'}
+                    </p>
                     <p>📍 ${d.sector}</p>
                     <p>🕐 Entrada: ${d.fecha_hora}</p>
                     <p>${infoRecorrido}</p>
@@ -634,6 +676,17 @@
                 </div>`;
             }).join('');
         }
+
+        // Guarda la asignación manual de puesto (Patrullero/Monitorista) en la cuenta dedicada,
+        // asociada a la fecha+turno actual. Nunca escribe en la base de datos original.
+        window.guardarPuesto = async function(claveAgenteNormalizada, nuevoPuesto) {
+            try {
+                await setDoc(doc(dbRoles, "asignacion_turno", idDocAsignacion), { [claveAgenteNormalizada]: nuevoPuesto }, { merge: true });
+            } catch (e) {
+                alert("❌ No se pudo guardar el puesto:\n" + e.message);
+                console.error(e);
+            }
+        };
 
         // Ver todos los recorridos de un agente DENTRO del turno ya cargado (instantáneo, sin nueva consulta)
         window.verRecorridosDelTurno = function(nombreOficial) {
@@ -707,8 +760,8 @@
                 const q = query(collection(db, "recorridos"), where("oficial", "==", texto), orderBy("timestamp", "desc"));
                 const snapshot = await getDocs(q);
                 let ultimaEntrada = null, ultimaSalida = null;
-                snapshot.forEach(doc => {
-                    const d = doc.data();
+                snapshot.forEach(docSnap => {
+                    const d = docSnap.data();
                     if (d.tipo === "ENTRADA" && !ultimaEntrada) ultimaEntrada = d;
                     if (d.tipo === "SALIDA" && !ultimaSalida) ultimaSalida = d;
                 });
