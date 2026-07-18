@@ -471,6 +471,27 @@
             return primerNombreA === primerNombreB;
         }
 
+        // ---------- ROLES CONOCIDOS: monitoristas base y cubreturnos ----------
+        const MONITORISTAS_BASE = ['Jose de Jesus Pizarro Soto', 'Leroy Lizarraga', 'Santillan'];
+        const CUBRETURNOS = ['Cesar Sotelo', 'Isael Mondragon'];
+
+        function esMonitoristaBase(nombre) { return MONITORISTAS_BASE.some(n => nombresCoinciden(n, nombre)); }
+        function esCubreturno(nombre) { return CUBRETURNOS.some(n => nombresCoinciden(n, nombre)); }
+
+        // Sugiere el puesto de un agente según las reglas:
+        // - Monitorista base presente -> se sugiere Monitorista para él.
+        // - Cubreturno presente Y hay un monitorista base también presente -> el cubreturno queda de Patrullero.
+        // - Cubreturno presente y NINGÚN monitorista base entró este turno -> se sugiere Monitorista para el cubreturno.
+        // - Cualquier otro agente -> Patrullero.
+        function sugerirPuesto(nombreAgente, nombresPresentesEnTurno) {
+            if (esMonitoristaBase(nombreAgente)) return 'monitorista';
+            if (esCubreturno(nombreAgente)) {
+                const hayBasePresente = nombresPresentesEnTurno.some(n => esMonitoristaBase(n));
+                return hayBasePresente ? 'patrullero' : 'monitorista';
+            }
+            return 'patrullero';
+        }
+
         // ---------- CARGA PRINCIPAL: SOLO EL TURNO SELECCIONADO, EN TIEMPO REAL ----------
         window.cargarBaseDeDatos = () => {
             const btn = document.querySelector('.btn-buscar');
@@ -603,6 +624,15 @@
                 }
             });
 
+            // Un recorrido pertenece al turno en el que INICIÓ, no al turno "matemático" del reloj.
+            // Esto evita que un patrullaje que arrancó en el turno anterior (dentro del margen de
+            // 1 hora que ensanchamos la consulta) se cuele en el turno actual.
+            Object.keys(recorridosAgrupados).forEach(id => {
+                if (turnoPorCercania(recorridosAgrupados[id].inicioTs, HORA_INICIO_TURNO) !== turnoSeleccionadoActual) {
+                    delete recorridosAgrupados[id];
+                }
+            });
+
             Object.keys(recorridosAgrupados).forEach(id => {
                 const r = recorridosAgrupados[id];
                 const btnMapa = `<button class="btn-ver-ruta" onclick="dibujarRuta('${id}')">🗺️ Trazar Ruta</button>`;
@@ -636,6 +666,8 @@
                 return;
             }
 
+            const nombresPresentesEnTurno = enTurno.map(x => x.oficial);
+
             cont.innerHTML = enTurno.map(d => {
                 // Buscar el recorrido más reciente de este agente (dentro del turno ya cargado)
                 const recorridosDelAgente = Object.values(recorridosAgrupados).filter(r => nombresCoinciden(r.oficial, d.oficial));
@@ -646,10 +678,10 @@
                     : 'Sin recorridos registrados en este turno';
 
                 // Puesto: si ya hay una asignación manual guardada, se respeta; si no, se sugiere
-                // por la regla simple (sin recorridos en el turno -> probablemente monitorista).
+                // según la lista de monitoristas base / cubreturnos (ver sugerirPuesto).
                 const clave = normalizarNombre(d.oficial);
                 const puestoGuardado = asignacionPuestos[clave];
-                const puestoSugerido = recorridosDelAgente.length > 0 ? 'patrullero' : 'monitorista';
+                const puestoSugerido = sugerirPuesto(d.oficial, nombresPresentesEnTurno);
                 const puestoActual = puestoGuardado || puestoSugerido;
                 const esSugerido = !puestoGuardado;
                 const etiquetaPuesto = puestoActual === 'monitorista' ? '🖥️ Monitorista' : '🚓 Patrullero';
