@@ -454,7 +454,6 @@
 
         const NOMBRE_TURNO = { 1: 'Turno 1 · 07:00–15:00', 2: 'Turno 2 · 15:00–23:00', 3: 'Turno 3 · 23:00–07:00' };
         let turnoSeleccionadoActual = 1;
-        let fechaSeleccionadaActual = ''; // YYYY-MM-DD del turno que se está viendo
 
         // Compara nombres de agentes sin importar mayúsculas/minúsculas ni espacios de más
         // (ej. "MARIO IBARRA" y "Mario ibarra" deben tratarse como la misma persona).
@@ -476,43 +475,15 @@
         const MONITORISTAS_BASE = ['Jose de Jesus Pizarro Soto', 'Leroy Lizarraga', 'Santillan'];
         const CUBRETURNOS = ['Cesar Sotelo', 'Isael Mondragon'];
 
-        // Filtro 11: solo hay 2 nombres fijos conocidos por ahora — el resto de asignaciones
-        // (soporte adicional, etc.) varía "según necesidades del servicio" y se deja 100% manual,
-        // sin forzar ninguna sugerencia automática para esos casos.
-        const ENCARGADO_F11 = ['Luis Castro'];
-        const VIGIA_AGUILA_F11 = ['Armando Sanchez']; // da soporte en F11 hasta las 9am, luego pasa a "Monitorista Águila"
-
         function esMonitoristaBase(nombre) { return MONITORISTAS_BASE.some(n => nombresCoinciden(n, nombre)); }
         function esCubreturno(nombre) { return CUBRETURNOS.some(n => nombresCoinciden(n, nombre)); }
-        function esEncargadoF11(nombre) { return ENCARGADO_F11.some(n => nombresCoinciden(n, nombre)); }
-        function esVigiaAguilaF11(nombre) { return VIGIA_AGUILA_F11.some(n => nombresCoinciden(n, nombre)); }
-
-        const ETIQUETA_PUESTO = {
-            patrullero: '🚓 Patrullero',
-            monitorista: '🖥️ Monitorista (F0)',
-            encargado_f11: '🚧 Encargado F11',
-            soporte_f11: '🛠️ Soporte F11',
-            monitorista_aguila: '🦅 Monitorista Águila (F11)',
-            patrullero_f11: '🚓 Patrullero F11 (amarillo + obras)'
-        };
 
         // Sugiere el puesto de un agente según las reglas:
-        // - Encargado F11 conocido (Luis Castro) -> se sugiere Encargado F11 (puede variar, es solo sugerencia).
-        // - Vigía Águila conocido (Armando Sanchez) -> Soporte F11 antes de las 9am, Monitorista Águila después
-        //   (solo aplica la hora real si se está viendo el turno de HOY; en fechas pasadas se asume ya el cambio).
         // - Monitorista base presente -> se sugiere Monitorista para él.
         // - Cubreturno presente Y hay un monitorista base también presente -> el cubreturno queda de Patrullero.
         // - Cubreturno presente y NINGÚN monitorista base entró este turno -> se sugiere Monitorista para el cubreturno.
-        // - Cualquier otro agente -> Patrullero (incluye a "los demás según necesidades" del Filtro 11,
-        //   que se asignan manualmente eligiendo la opción correspondiente en el selector).
+        // - Cualquier otro agente -> Patrullero.
         function sugerirPuesto(nombreAgente, nombresPresentesEnTurno) {
-            if (esEncargadoF11(nombreAgente)) return 'encargado_f11';
-            if (esVigiaAguilaF11(nombreAgente)) {
-                const hoyStr = new Date().toISOString().split('T')[0];
-                const esHoy = fechaSeleccionadaActual === hoyStr;
-                const antesDeLas9 = esHoy && new Date().getHours() < 9;
-                return antesDeLas9 ? 'soporte_f11' : 'monitorista_aguila';
-            }
             if (esMonitoristaBase(nombreAgente)) return 'monitorista';
             if (esCubreturno(nombreAgente)) {
                 const hayBasePresente = nombresPresentesEnTurno.some(n => esMonitoristaBase(n));
@@ -533,7 +504,6 @@
             const fSector = document.getElementById('filtroSector').value;
             const turnoId = parseInt(document.getElementById('filtroTurno').value, 10);
             turnoSeleccionadoActual = turnoId;
-            fechaSeleccionadaActual = fFecha;
 
             const [y, m, d] = fFecha.split('-').map(Number);
             const fechaBase = new Date(y, m - 1, d);
@@ -657,16 +627,8 @@
             // Un recorrido pertenece al turno en el que INICIÓ, no al turno "matemático" del reloj.
             // Esto evita que un patrullaje que arrancó en el turno anterior (dentro del margen de
             // 1 hora que ensanchamos la consulta) se cuele en el turno actual.
-            //
-            // Caso especial: si nunca llegó el documento real de INICIO_RECORRIDO (por eso "inicio"
-            // se quedó en "Desconocido"), significa que el recorrido arrancó ANTES de que empezara
-            // la ventana de esta consulta — es decir, es 100% del turno anterior, sin importar qué
-            // tan cerca caigan sus puntos intermedios. Se excluye siempre, sin excepción.
             Object.keys(recorridosAgrupados).forEach(id => {
-                const r = recorridosAgrupados[id];
-                const empezoAntesDeLaVentana = r.inicio === "Desconocido";
-                const noPerteneceAlTurno = turnoPorCercania(r.inicioTs, HORA_INICIO_TURNO) !== turnoSeleccionadoActual;
-                if (empezoAntesDeLaVentana || noPerteneceAlTurno) {
+                if (turnoPorCercania(recorridosAgrupados[id].inicioTs, HORA_INICIO_TURNO) !== turnoSeleccionadoActual) {
                     delete recorridosAgrupados[id];
                 }
             });
@@ -722,7 +684,7 @@
                 const puestoSugerido = sugerirPuesto(d.oficial, nombresPresentesEnTurno);
                 const puestoActual = puestoGuardado || puestoSugerido;
                 const esSugerido = !puestoGuardado;
-                const etiquetaPuesto = ETIQUETA_PUESTO[puestoActual] || puestoActual;
+                const etiquetaPuesto = puestoActual === 'monitorista' ? '🖥️ Monitorista' : '🚓 Patrullero';
 
                 return `<div class="card-agente" style="${enCurso ? 'border-left-color:#e67e22;' : ''}">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
@@ -731,11 +693,7 @@
                     <p style="margin-top:0;">
                         <select onchange="guardarPuesto('${clave}', this.value)" style="font-size:11.5px; padding:3px 6px; border-radius:6px;">
                             <option value="patrullero" ${puestoActual === 'patrullero' ? 'selected' : ''}>🚓 Patrullero</option>
-                            <option value="monitorista" ${puestoActual === 'monitorista' ? 'selected' : ''}>🖥️ Monitorista (F0)</option>
-                            <option value="encargado_f11" ${puestoActual === 'encargado_f11' ? 'selected' : ''}>🚧 Encargado F11</option>
-                            <option value="soporte_f11" ${puestoActual === 'soporte_f11' ? 'selected' : ''}>🛠️ Soporte F11</option>
-                            <option value="monitorista_aguila" ${puestoActual === 'monitorista_aguila' ? 'selected' : ''}>🦅 Monitorista Águila (F11)</option>
-                            <option value="patrullero_f11" ${puestoActual === 'patrullero_f11' ? 'selected' : ''}>🚓 Patrullero F11 (amarillo + obras)</option>
+                            <option value="monitorista" ${puestoActual === 'monitorista' ? 'selected' : ''}>🖥️ Monitorista</option>
                         </select>
                         ${esSugerido ? '<span style="font-size:11px; color:#95a5a6;"> (sugerido)</span>' : '<span style="font-size:11px; color:#27ae60;"> (confirmado)</span>'}
                     </p>
