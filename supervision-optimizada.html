@@ -171,6 +171,11 @@
             z-index: 1000; align-items: center; justify-content: center; padding: 20px;
         }
         #modal-auditoria.visible { display: flex; }
+        #modal-directorio {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+            z-index: 1000; align-items: center; justify-content: center; padding: 20px;
+        }
+        #modal-directorio.visible { display: flex; }
         .caja-historial { background: white; border-radius: 12px; width: 100%; max-width: 950px; max-height: 85vh; overflow-y: auto; padding: 20px; }
         .caja-historial-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .caja-historial-header button { background: #ecf0f1; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; }
@@ -202,6 +207,7 @@
         </div>
         <button onclick="cargarBaseDeDatos()" class="btn-buscar">🔄 Recargar ahora</button>
         <button onclick="abrirAuditoriaCompleta()" class="btn-buscar" style="background:#8e44ad;">🗂️ Auditoría Completa</button>
+        <button onclick="abrirDirectorio()" class="btn-buscar" style="background:#16a085;">👤 Directorio de Personal</button>
         <span id="indicadorEnVivo" style="font-size:12px; color:#bdc3c7; align-self:center;">Conectando...</span>
     </header>
 
@@ -252,6 +258,25 @@
         </div>
     </div>
 
+    <!-- Modal del Directorio de Personal (editable, se guarda en la cuenta dedicada) -->
+    <div id="modal-directorio">
+        <div class="caja-historial">
+            <div class="caja-historial-header">
+                <h3 style="margin:0;">👤 Directorio de Personal</h3>
+                <button onclick="cerrarDirectorio()">✕ Cerrar</button>
+            </div>
+            <p style="font-size:12.5px; color:#7f8c8d; margin-top:0;">Agrega o corrige el nombre completo y distintivo de cada agente. Los cambios se guardan solos y se aplican de inmediato en toda la app.</p>
+
+            <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap; align-items:flex-end;">
+                <div style="flex:2; min-width:200px;"><label style="font-size:12px; color:#7f8c8d;">Nombre completo</label><br><input type="text" id="nuevoNombreDirectorio" placeholder="Ej. Juan Pérez López" style="width:100%;"></div>
+                <div style="flex:1; min-width:140px;"><label style="font-size:12px; color:#7f8c8d;">Distintivo (opcional)</label><br><input type="text" id="nuevoDistintivoDirectorio" placeholder="Ej. Halcón" style="width:100%;"></div>
+                <div><button class="btn-buscar" onclick="agregarEntradaDirectorio()">+ Guardar</button></div>
+            </div>
+
+            <div id="contenidoDirectorio"></div>
+        </div>
+    </div>
+
     <!-- Modal de mapa: no se monta Leaflet hasta que se abre por primera vez -->
     <div id="modal-mapa">
         <div class="caja-mapa">
@@ -277,7 +302,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, query, orderBy, where, getDocs, onSnapshot, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, query, orderBy, where, getDocs, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // Conexión #1: cuenta ORIGINAL — solo lectura, aquí viven los datos reales de asistencia/recorridos
         const firebaseConfig = {
@@ -374,6 +399,7 @@
 
                 snapshot.forEach(docSnap => {
                     const d = docSnap.data();
+                    d.oficial = resolverCanonico(d.oficial);
                     if (d.tipo === "ENTRADA" || d.tipo === "SALIDA") {
                         const color = d.tipo === "ENTRADA" ? "bg-entrada" : "bg-salida";
                         filasAsist.push(`<tr><td><b>${d.oficial}</b></td><td>${d.sector}</td><td><span class="badge ${color}">${d.tipo}</span></td><td>${d.fecha_hora}</td></tr>`);
@@ -455,21 +481,87 @@
         const NOMBRE_TURNO = { 1: 'Turno 1 · 07:00–15:00', 2: 'Turno 2 · 15:00–23:00', 3: 'Turno 3 · 23:00–07:00' };
         let turnoSeleccionadoActual = 1;
         let fechaSeleccionadaActual = ''; // YYYY-MM-DD del turno que se está viendo
+        let inicioOficialTurnoActual = 0; // timestamp del inicio oficial (sin margen) del turno actual
 
-        // Compara nombres de agentes sin importar mayúsculas/minúsculas ni espacios de más
-        // (ej. "MARIO IBARRA" y "Mario ibarra" deben tratarse como la misma persona).
-        // Si no coincide el nombre completo, prueba solo por el primer nombre, para cubrir
-        // casos como "Jorge Macias" (entrada) vs "Jorge" (recorrido) donde falta el apellido.
+        // Compara nombres de agentes sin importar mayúsculas/minúsculas, acentos, ni espacios de más
+        // (ej. "MARIO IBARRA", "Mario ibarra" y "Mário Ibarra" se tratan como la misma persona).
+        // Si no coincide el nombre completo, compara palabra por palabra: si el nombre más corto
+        // (el que se usó al azar en el recorrido, sea el primer nombre, un segundo nombre, o el
+        // apellido) aparece completo dentro del nombre más largo, se consideran la misma persona.
+        // Como por turno trabaja poco personal, este cruce flexible no genera confusión real.
         function normalizarNombre(nombre) {
-            return (nombre || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            return (nombre || '')
+                .trim()
+                .toUpperCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quita acentos (Á->A, Ñ se conserva)
+                .replace(/\s+/g, ' ');
         }
         function nombresCoinciden(nombreA, nombreB) {
             const a = normalizarNombre(nombreA), b = normalizarNombre(nombreB);
             if (!a || !b) return false;
             if (a === b) return true;
-            const primerNombreA = a.split(' ')[0];
-            const primerNombreB = b.split(' ')[0];
-            return primerNombreA === primerNombreB;
+            const palabrasA = a.split(' ').filter(Boolean);
+            const palabrasB = b.split(' ').filter(Boolean);
+            const corta = palabrasA.length <= palabrasB.length ? palabrasA : palabrasB;
+            const larga = palabrasA.length <= palabrasB.length ? palabrasB : palabrasA;
+            // Coincide si TODAS las palabras del nombre más corto están dentro del nombre más largo
+            // (cubre "Pérez" solo, o "Juan Pérez", contra "Juan Carlos Pérez López" completo).
+            return corta.length > 0 && corta.every(palabra => larga.includes(palabra));
+        }
+
+        // ---------- DIRECTORIO DE PERSONAL (nombre completo <-> distintivo) ----------
+        // Algunos agentes usan su distintivo (apodo de radio) en vez de su nombre real al
+        // marcar entrada o registrar el recorrido. Como el distintivo no comparte ninguna
+        // palabra con el nombre real, la comparación normal no los relaciona — por eso se
+        // necesita este directorio explícito. Cualquiera de los dos (nombre o distintivo)
+        // que usen, el sistema los reconoce como la misma persona y muestra el nombre real.
+        //
+        // DIRECTORIO_PERSONAL_BASE es el punto de partida (lo que ya conocíamos). El editor
+        // dentro de la misma app (panel "👤 Directorio de Personal") guarda los cambios en la
+        // cuenta dedicada (colección "directorio_personal"), y esos SIEMPRE tienen prioridad
+        // sobre esta lista base — así se puede agregar, corregir o quitar gente sin tocar código.
+        const DIRECTORIO_PERSONAL_BASE = [
+            { nombre: 'Isael Mondragon Arroyo', distintivo: 'Zorro' },
+            { nombre: 'Abel Jimenez Nava', distintivo: '' },
+            { nombre: 'Martin Vinalay Hipolito', distintivo: 'Lince' },
+            { nombre: 'Cesar Sotelo Sanchez', distintivo: 'Gallo' },
+            { nombre: 'Luis Alfonso Acosta Carrillo', distintivo: 'Lobo' },
+            { nombre: 'Armando Sanchez Sanchez', distintivo: 'Aguila' },
+            { nombre: 'Leroy Abraham Lizarraga Morales', distintivo: 'Leon' },
+            { nombre: 'Jose Angel Rodriguez Morales', distintivo: 'Pantera' },
+            { nombre: 'Zenaido Santillan De La Cruz', distintivo: 'Dragon' },
+            { nombre: 'Jose de Jesus Pizarro Soto', distintivo: 'BlackLobo' },
+            { nombre: 'Luis Alejandro Castro Arellano', distintivo: 'Delfin' },
+            { nombre: 'Mario Alberto Ibarra Haros', distintivo: 'Cobra' },
+            { nombre: 'Leonardo Calderon', distintivo: 'Tiburon' },
+        ];
+        let DIRECTORIO_PERSONAL = [...DIRECTORIO_PERSONAL_BASE]; // se recalcula al vivo con lo que haya en Firestore
+
+        function reconstruirDirectorio(docsFirestore) {
+            const mapa = new Map();
+            DIRECTORIO_PERSONAL_BASE.forEach(p => mapa.set(normalizarNombre(p.nombre), { ...p }));
+            docsFirestore.forEach(p => mapa.set(normalizarNombre(p.nombre), { ...p })); // Firestore siempre gana
+            DIRECTORIO_PERSONAL = Array.from(mapa.values());
+        }
+
+        // Devuelve el nombre REAL y completo de la persona, sin importar si venía con su
+        // nombre (completo o parcial) o con su distintivo. Si no está en el directorio,
+        // regresa el nombre tal cual llegó (agente desconocido / no catalogado aún).
+        function resolverCanonico(nombreCrudo) {
+            const norm = normalizarNombre(nombreCrudo);
+            if (!norm) return nombreCrudo;
+            const porDistintivo = DIRECTORIO_PERSONAL.find(p => p.distintivo && normalizarNombre(p.distintivo) === norm);
+            if (porDistintivo) return porDistintivo.nombre;
+            const porNombre = DIRECTORIO_PERSONAL.find(p => nombresCoinciden(p.nombre, nombreCrudo));
+            if (porNombre) return porNombre.nombre;
+            return nombreCrudo;
+        }
+
+        // Devuelve el distintivo de alguien ya identificado por su nombre real (para mostrarlo en la tarjeta).
+        function distintivoDe(nombreCanonico) {
+            const norm = normalizarNombre(nombreCanonico);
+            const entry = DIRECTORIO_PERSONAL.find(p => normalizarNombre(p.nombre) === norm);
+            return entry ? entry.distintivo : '';
         }
 
         // ---------- ROLES CONOCIDOS: monitoristas base y cubreturnos ----------
@@ -538,6 +630,7 @@
             const [y, m, d] = fFecha.split('-').map(Number);
             const fechaBase = new Date(y, m - 1, d);
             const { inicio: inicioTurno, fin: finTurno } = calcularRangoTurno(fechaBase, turnoId);
+            inicioOficialTurnoActual = inicioTurno + (60 * 60 * 1000); // el margen que ensanchamos siempre es de 1 hora
 
             document.getElementById('tituloTurno').innerText = `— ${NOMBRE_TURNO[turnoId]} (${fFecha})`;
 
@@ -561,7 +654,11 @@
 
                 unsubscribeActual = onSnapshot(q, (snapshot) => {
                     datosDelDia = [];
-                    snapshot.forEach(docSnap => datosDelDia.push(docSnap.data()));
+                    snapshot.forEach(docSnap => {
+                        const d = docSnap.data();
+                        d.oficial = resolverCanonico(d.oficial); // nombre real, aunque haya usado su distintivo
+                        datosDelDia.push(d);
+                    });
 
                     if (fSector !== "TODOS") {
                         datosDelDia = datosDelDia.filter(d => d.sector === fSector);
@@ -649,7 +746,7 @@
                     if (d.tipo === "INICIO_RECORRIDO") recorridosAgrupados[id].inicio = (d.fecha_hora || "").split(',')[1] || d.fecha_hora;
                     if (d.tipo === "FIN_RECORRIDO") recorridosAgrupados[id].fin = (d.fecha_hora || "").split(',')[1] || d.fecha_hora;
                     if (d.latitud && d.longitud) {
-                        recorridosAgrupados[id].puntos.push({ lat: d.latitud, lng: d.longitud, nov: d.novedad, foto: d.evidencia_foto, hora: (d.fecha_hora || "").split(',')[1] || d.fecha_hora, tipo: d.tipo });
+                        recorridosAgrupados[id].puntos.push({ lat: d.latitud, lng: d.longitud, nov: d.novedad, foto: d.evidencia_foto, hora: (d.fecha_hora || "").split(',')[1] || d.fecha_hora, tipo: d.tipo, ts: d.timestamp });
                     }
                 }
             });
@@ -657,10 +754,23 @@
             // Un recorrido pertenece al turno en el que INICIÓ, no al turno "matemático" del reloj.
             // Esto evita que un patrullaje que arrancó en el turno anterior (dentro del margen de
             // 1 hora que ensanchamos la consulta) se cuele en el turno actual.
+            //
+            // Caso especial: si nunca llegó el documento real de INICIO_RECORRIDO ("inicio" quedó
+            // en "Desconocido"), el recorrido arrancó antes de esta ventana. Si YA TERMINÓ, es puro
+            // historial del turno anterior y se descarta. Pero si SIGUE EN CURSO y tiene puntos
+            // registrados ya dentro de este turno (hora oficial en adelante), es la actividad real
+            // de alguien que dobló turno sin cerrar su recorrido anterior — ese sí se conserva.
             Object.keys(recorridosAgrupados).forEach(id => {
-                if (turnoPorCercania(recorridosAgrupados[id].inicioTs, HORA_INICIO_TURNO) !== turnoSeleccionadoActual) {
-                    delete recorridosAgrupados[id];
-                }
+                const r = recorridosAgrupados[id];
+                const empezoAntesDeLaVentana = r.inicio === "Desconocido";
+                const noPerteneceAlTurno = turnoPorCercania(r.inicioTs, HORA_INICIO_TURNO) !== turnoSeleccionadoActual;
+                if (!empezoAntesDeLaVentana && !noPerteneceAlTurno) return; // pertenece normal, se conserva
+
+                const sigueEnCurso = r.fin === "En proceso...";
+                const tieneActividadEnEsteTurno = r.puntos.some(p => p.ts && p.ts >= inicioOficialTurnoActual);
+                if (sigueEnCurso && tieneActividadEnEsteTurno) return; // doble turno: se conserva
+
+                delete recorridosAgrupados[id];
             });
 
             Object.keys(recorridosAgrupados).forEach(id => {
@@ -715,10 +825,14 @@
                 const puestoActual = puestoGuardado || puestoSugerido;
                 const esSugerido = !puestoGuardado;
                 const etiquetaPuesto = ETIQUETA_PUESTO[puestoActual] || puestoActual;
+                const distintivo = distintivoDe(d.oficial);
 
                 return `<div class="card-agente" style="${enCurso ? 'border-left-color:#e67e22;' : ''}">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-                        <h4 style="margin-bottom:2px;">👮 ${d.oficial}</h4>
+                        <h4 style="margin-bottom:2px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            👮 ${d.oficial}
+                            ${distintivo ? `<span style="background:#1a2a3a; color:#fff; font-size:10px; font-weight:bold; padding:3px 9px; border-radius:10px; letter-spacing:0.5px;">${distintivo.toUpperCase()}</span>` : ''}
+                        </h4>
                     </div>
                     <p style="margin-top:0;">
                         <select onchange="guardarPuesto('${clave}', this.value)" style="font-size:11.5px; padding:3px 6px; border-radius:6px;">
@@ -904,6 +1018,78 @@
                 rutaRoja = L.polyline(coordenadasLinea, { color: 'red', weight: 4, opacity: 0.8 }).addTo(map);
                 map.fitBounds(rutaRoja.getBounds());
             }, 60);
+        };
+
+        // ---------- EDITOR DEL DIRECTORIO DE PERSONAL (se guarda en la cuenta dedicada) ----------
+        onSnapshot(collection(dbRoles, "directorio_personal"), (snapshot) => {
+            const docsFirestore = [];
+            snapshot.forEach(docSnap => docsFirestore.push(docSnap.data()));
+            reconstruirDirectorio(docsFirestore);
+            if (datosDelDia.length > 0) procesarDatosDelDia(); // re-renderiza tarjetas con el directorio actualizado
+            if (document.getElementById('modal-directorio').classList.contains('visible')) renderizarDirectorio(docsFirestore);
+        }, (e) => console.error("Error leyendo directorio de personal:", e));
+
+        window.abrirDirectorio = function() {
+            document.getElementById('modal-directorio').classList.add('visible');
+            renderizarDirectorio();
+        };
+
+        window.cerrarDirectorio = function() {
+            document.getElementById('modal-directorio').classList.remove('visible');
+        };
+
+        window.renderizarDirectorio = function() {
+            const cont = document.getElementById('contenidoDirectorio');
+            const filas = [...DIRECTORIO_PERSONAL].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(p => {
+                const idSlug = normalizarNombre(p.nombre).replace(/\s+/g, '_');
+                return `<tr>
+                    <td><input type="text" value="${p.nombre}" id="edit-nombre-${idSlug}" style="width:100%; font-size:12.5px;"></td>
+                    <td><input type="text" value="${p.distintivo || ''}" id="edit-distintivo-${idSlug}" style="width:100%; font-size:12.5px;"></td>
+                    <td style="white-space:nowrap;">
+                        <button class="btn-ver-ruta" style="background:#2980b9;" onclick="guardarEdicionDirectorio('${idSlug}')">💾 Guardar</button>
+                        <button class="btn-ver-ruta" onclick="eliminarEntradaDirectorio('${idSlug}')">🗑️</button>
+                    </td>
+                </tr>`;
+            });
+            cont.innerHTML = `<table><thead><tr><th>Nombre completo</th><th>Distintivo</th><th>Acción</th></tr></thead><tbody>${filas.join('')}</tbody></table>`;
+        };
+
+        window.agregarEntradaDirectorio = async function() {
+            const nombre = document.getElementById('nuevoNombreDirectorio').value.trim();
+            const distintivo = document.getElementById('nuevoDistintivoDirectorio').value.trim();
+            if (!nombre) { alert("Escribe al menos el nombre completo."); return; }
+            try {
+                const idSlug = normalizarNombre(nombre).replace(/\s+/g, '_');
+                await setDoc(doc(dbRoles, "directorio_personal", idSlug), { nombre, distintivo });
+                document.getElementById('nuevoNombreDirectorio').value = '';
+                document.getElementById('nuevoDistintivoDirectorio').value = '';
+            } catch (e) {
+                alert("❌ No se pudo guardar:\n" + e.message);
+                console.error(e);
+            }
+        };
+
+        window.guardarEdicionDirectorio = async function(idSlug) {
+            const nombre = document.getElementById(`edit-nombre-${idSlug}`).value.trim();
+            const distintivo = document.getElementById(`edit-distintivo-${idSlug}`).value.trim();
+            if (!nombre) { alert("El nombre no puede quedar vacío."); return; }
+            try {
+                await setDoc(doc(dbRoles, "directorio_personal", idSlug), { nombre, distintivo });
+                alert("✅ Guardado.");
+            } catch (e) {
+                alert("❌ No se pudo guardar:\n" + e.message);
+                console.error(e);
+            }
+        };
+
+        window.eliminarEntradaDirectorio = async function(idSlug) {
+            if (!confirm("¿Quitar esta entrada del directorio? (si es alguien de la lista base, volverá a su valor original)")) return;
+            try {
+                await deleteDoc(doc(dbRoles, "directorio_personal", idSlug));
+            } catch (e) {
+                alert("❌ No se pudo eliminar:\n" + e.message);
+                console.error(e);
+            }
         };
 
         window.onload = () => {
